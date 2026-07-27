@@ -52,3 +52,6 @@ strict = false
 asyncio_mode = "auto"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+markers = [
+    "integration: cross-service integration tests (require external services running)",
+]
