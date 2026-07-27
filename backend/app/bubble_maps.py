@@ -391,6 +391,22 @@ class BubbleMapsPro:
             if n.entity_type:
                 by_entity[n.entity_type] = by_entity.get(n.entity_type, 0) + 1
 
+        # ── Write findings back to DataBus (fire-and-forget) ──────────
+        # Creates a feedback loop: rugmaps finds risky clusters →
+        # rmi-backend uses them for risk scoring → rugmaps queries improved scores.
+        # This is intentionally fire-and-forget — never blocks generate_map().
+        if risk_score > 50 or risk_level in ("high", "critical"):
+            asyncio.create_task(
+                self._databus_ingest_cluster(
+                    center_wallet,
+                    chain,
+                    risk_score,
+                    risk_level,
+                    len(nodes),
+                    len(links),
+                )
+            )
+
         return BubbleMapResult(
             center_address=center_wallet,
             chain=chain,
@@ -515,6 +531,70 @@ class BubbleMapsPro:
         final_score = min(100, avg_risk + penalty / max(1, len(nodes)))
 
         return final_score, self._risk_level(final_score)
+
+    async def _databus_ingest_cluster(
+        self,
+        address: str,
+        chain: str,
+        risk_score: float,
+        risk_level: str,
+        node_count: int,
+        link_count: int,
+    ) -> None:
+        """Fire-and-forget: POST wallet cluster findings back to rmi-backend's DataBus.
+
+        This creates the critical feedback loop:
+            rugmaps finds clusters → rmi-backend uses them for risk scoring
+            → rugmaps queries improved scores on next scan.
+
+        Non-blocking by design: errors are logged but never propagated.
+        The POST runs in a background task so generate_map() returns immediately.
+        """
+        ingest_url = f"{BACKEND_URL}/api/v1/databus/ingest"
+        payload = {
+            "source": "rugmaps",
+            "data_type": "wallet_cluster",
+            "content": {
+                "address": address,
+                "risk_score": round(risk_score, 1),
+                "risk_level": risk_level,
+                "nodes": node_count,
+                "links": link_count,
+                "chain": chain,
+            },
+            "token_address": address,
+            "chain": chain,
+        }
+        try:
+            # Use a short-lived client to avoid holding connections from the pool
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.post(ingest_url, json=payload)
+                if resp.status_code < 400:
+                    logger.info(
+                        "databus_ingest_ok",
+                        address=address[:12],
+                        risk_score=risk_score,
+                        status=resp.status_code,
+                    )
+                else:
+                    logger.debug(
+                        "databus_ingest_non_ok",
+                        address=address[:12],
+                        status=resp.status_code,
+                        body=resp.text[:200],
+                    )
+        except (httpx.ConnectError, httpx.TimeoutException, httpx.RemoteProtocolError) as exc:
+            logger.debug(
+                "databus_ingest_unavailable",
+                address=address[:12],
+                error=str(exc)[:100],
+            )
+        except Exception as exc:
+            logger.warning(
+                "databus_ingest_failed",
+                address=address[:12],
+                error=str(exc)[:200],
+            )
 
     @staticmethod
     def _risk_level(score: float) -> str:
