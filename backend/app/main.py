@@ -17,6 +17,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.routers.bubble_maps_router import router as bubble_maps_router
+from app.routers.honeypot_map import router as honeypot_map_router
+
 logger = logging.getLogger(__name__)
 
 # ── App metadata ──────────────────────────────────────────────────────────
@@ -70,22 +73,11 @@ async def log_requests(request: Request, call_next):
 
 # ── Mount routers ─────────────────────────────────────────────────────────
 
-# Import routers (lazy to avoid circular imports)
-try:
-    from routers.bubble_maps_router import router as bubble_maps_router
+app.include_router(bubble_maps_router)
+logger.info("Mounted bubble_maps_router at /api/v1/rugmaps/*")
 
-    app.include_router(bubble_maps_router)
-    logger.info("Mounted bubble_maps_router at /api/v1/rugmaps/*")
-except ImportError as e:
-    logger.warning(f"bubble_maps_router not available: {e}")
-
-try:
-    from routers.honeypot_map import router as honeypot_map_router
-
-    app.include_router(honeypot_map_router)
-    logger.info("Mounted honeypot_map_router at /api/v1/honeypot-map/*")
-except ImportError as e:
-    logger.warning(f"honeypot_map_router not available: {e}")
+app.include_router(honeypot_map_router)
+logger.info("Mounted honeypot_map_router at /api/v1/honeypot-map/*")
 
 
 # ── Root endpoints ────────────────────────────────────────────────────────

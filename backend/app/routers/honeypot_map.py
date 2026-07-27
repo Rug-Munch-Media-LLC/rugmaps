@@ -2,11 +2,14 @@
 """#14 — Honeypot Network Map. Maps all known honeypot contracts, clusters by deployer,
 fund flows. Interactive graph showing the honeypot factory network."""
 
+import logging
 import os
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/honeypot-map", tags=["honeypot-map"])
 
@@ -75,8 +78,8 @@ async def get_honeypot_deployer(deployer_address: str, chain: str = Query("ether
                                 "relationship": "deployed",
                             }
                         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Eth-labels search failed: %s", e)
 
     return {"nodes": nodes, "edges": edges, "total_contracts": len([n for n in nodes if n["type"] != "deployer"])}
 

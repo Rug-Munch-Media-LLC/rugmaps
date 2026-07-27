@@ -226,8 +226,8 @@ async def token_holder_graph(
                 chain,
                 {"event": "scanned_in_graph", "token": token_address, "risk": node.get("risk", 0)},
             )
-    except Exception:
-        pass  # Auto-labeling is best-effort
+    except Exception as e:
+        logger.debug("Auto-labeling failed (best-effort): %s", e)
 
     return response
 
