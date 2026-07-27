@@ -13,9 +13,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/rugmaps", tags=["rugmaps"])
 
+SUPPORTED_CHAINS = {"solana", "ethereum", "base", "bsc", "arbitrum", "optimism", "polygon"}
+
 
 class RugMapsRequest(BaseModel):
     center_wallet: str
+    chain: str = "ethereum"
     depth: int = 2
     min_strength: float = 0.1
 
@@ -29,13 +32,26 @@ def _get_rm():
         raise HTTPException(status_code=503, detail=f"Module unavailable: {e}")
 
 
+def _validate_chain(chain: str) -> str:
+    chain = chain.lower()
+    if chain not in SUPPORTED_CHAINS:
+        raise HTTPException(
+            status_code=400, detail=f"Unsupported chain: {chain}. Supported: {', '.join(sorted(SUPPORTED_CHAINS))}"
+        )
+    return chain
+
+
 @router.post("/map")
 async def generate_rug_map(req: RugMapsRequest):
     """Generate interactive RugMap for a wallet (2-hop default)."""
+    chain = _validate_chain(req.chain)
     rm = _get_rm()
     try:
         result = await rm.generate_map(
-            center_wallet=req.center_wallet, depth=min(req.depth, 5), min_strength=req.min_strength
+            center_wallet=req.center_wallet,
+            chain=chain,
+            depth=min(req.depth, 5),
+            min_strength=req.min_strength,
         )
         return result.to_dict()
     except ValueError as e:
@@ -45,13 +61,19 @@ async def generate_rug_map(req: RugMapsRequest):
 
 
 @router.get("/analyze/{address}")
-async def analyze_wallet(address: str, depth: int = Query(2, ge=1, le=5)):
+async def analyze_wallet(
+    address: str,
+    chain: str = Query("ethereum", description="Blockchain identifier"),
+    depth: int = Query(2, ge=1, le=5),
+):
     """Quick wallet analysis with RugMaps data."""
+    chain = _validate_chain(chain)
     rm = _get_rm()
-    result = await rm.generate_map(center_wallet=address, depth=depth)
+    result = await rm.generate_map(center_wallet=address, chain=chain, depth=depth)
     d = result.to_dict()
     return {
         "address": address,
+        "chain": chain,
         "node_count": len(d.get("nodes", [])),
         "link_count": len(d.get("links", [])),
         "risk_level": d.get("risk_level", "unknown"),
@@ -62,12 +84,16 @@ async def analyze_wallet(address: str, depth: int = Query(2, ge=1, le=5)):
 
 
 @router.get("/entity/{address}")
-async def get_entity_info(address: str):
+async def get_entity_info(
+    address: str,
+    chain: str = Query("ethereum", description="Blockchain identifier"),
+):
     """Get entity information for an address."""
+    chain = _validate_chain(chain)
     rm = _get_rm()
-    info = await rm._get_entity_info(address)
-    risk, level = await rm._calculate_risk(address)
-    return {"address": address, "entity": info, "risk_score": risk, "risk_level": level}
+    info = await rm._get_entity_info(address, chain)
+    risk, level = await rm._calculate_risk(address, chain)
+    return {"address": address, "chain": chain, "entity": info, "risk_score": risk, "risk_level": level}
 
 
 @router.get("/health")
@@ -107,7 +133,7 @@ async def token_holder_graph(
 
     # Get the bubble map concurrently with other data fetches
     try:
-        result = await rm.generate_map(center_wallet=token_address, depth=3, min_strength=0.05)
+        result = await rm.generate_map(center_wallet=token_address, chain=chain, depth=3, min_strength=0.05)
         d = result.to_dict()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Graph generation failed: {str(e)[:200]}")
@@ -127,7 +153,7 @@ async def token_holder_graph(
 
     # Fetch wallet labels and similar scams in parallel
     labels, similar_scams, holders = await asyncio.gather(
-        get_wallet_labels(addresses_for_labels),
+        get_wallet_labels(addresses_for_labels, chain),
         search_similar_scams(token_address, chain),
         get_token_holders(token_address, chain),
         return_exceptions=True,

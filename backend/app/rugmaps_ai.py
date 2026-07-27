@@ -56,7 +56,7 @@ async def get_token_holders(token_address: str, chain: str) -> list[dict]:
         from app.bubble_maps import get_bubble_maps_pro
 
         bm = get_bubble_maps_pro()
-        result = await bm.generate_map(center_wallet=token_address, depth=2, min_strength=0.1)
+        result = await bm.generate_map(center_wallet=token_address, chain=chain, depth=2, min_strength=0.1)
         d = result.to_dict()
         return d.get("nodes", [])
     except Exception as e:
@@ -64,7 +64,7 @@ async def get_token_holders(token_address: str, chain: str) -> list[dict]:
         return []
 
 
-async def get_wallet_labels(addresses: list[str]) -> dict[str, dict]:
+async def get_wallet_labels(addresses: list[str], chain: str = "ethereum") -> dict[str, dict]:
     """Get wallet labels from our ClickHouse/FAISS database."""
     labels = {}
     try:
@@ -73,8 +73,8 @@ async def get_wallet_labels(addresses: list[str]) -> dict[str, dict]:
         bm = get_bubble_maps_pro()
         for addr in addresses[:50]:
             try:
-                info = await bm._get_entity_info(addr)
-                risk, level = await bm._calculate_risk(addr)
+                info = await bm._get_entity_info(addr, chain)
+                risk, level = await bm._calculate_risk(addr, chain)
                 labels[addr] = {
                     "entity": info or {},
                     "risk_score": risk,
@@ -204,7 +204,7 @@ SIMILAR SCAM PATTERNS (from our FAISS vector database):
 {similar_summary}
 
 WALLET LABELS (from our 393K-label database):
-{json.dumps({a[:12]: l.get("entity", {}).get("name") or l.get("entity", {}).get("label") for a, l in list(labels.items())[:10]})}
+{json.dumps({a[:12]: lb.get("entity", {}).get("name") or lb.get("entity", {}).get("label") for a, lb in list(labels.items())[:10]})}
 
 Based on our data, provide a JSON analysis with these fields:
 - "verdict": (SAFE / SUSPICIOUS / HIGH_RISK / SCAM)
