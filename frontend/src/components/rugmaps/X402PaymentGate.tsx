@@ -1,12 +1,12 @@
-import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Lock, Sparkles, Zap, Crown, CheckCircle2, Loader2, Wallet } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion'
+import { CheckCircle2, Crown, Loader2, Lock, Sparkles, Wallet, Zap } from 'lucide-react'
+import { useState } from 'react'
 
 interface X402PaymentGateProps {
-  onUpgrade: (tier: 'premium' | 'pro' | 'enterprise') => void;
-  isConnected: boolean;
-  walletAddress?: string;
-  isCRMHolder?: boolean;
+  onUpgrade: (tier: 'premium' | 'pro' | 'enterprise') => void
+  isConnected: boolean
+  walletAddress?: string
+  isCRMHolder?: boolean
 }
 
 const TIERS = [
@@ -40,27 +40,27 @@ const TIERS = [
     icon: Crown,
     color: '#06B6D4',
   },
-];
+]
 
 export default function X402PaymentGate({ onUpgrade, isConnected, walletAddress, isCRMHolder }: X402PaymentGateProps) {
-  const [selectedTier, setSelectedTier] = useState<string | null>(null);
-  const [processing, setProcessing] = useState(false);
+  const [selectedTier, setSelectedTier] = useState<string | null>(null)
+  const [processing, setProcessing] = useState(false)
 
-  const handlePay = async (tier: typeof TIERS[0]) => {
-    setSelectedTier(tier.id);
-    setProcessing(true);
-    
+  const handlePay = async (tier: (typeof TIERS)[0]) => {
+    setSelectedTier(tier.id)
+    setProcessing(true)
+
     // In production: x402 payment flow
     // 1. Get payment requirements from backend
     // 2. Sign transaction with wallet
     // 3. Submit proof to backend
     // 4. Unlock premium features
-    
+
     setTimeout(() => {
-      setProcessing(false);
-      onUpgrade(tier.id);
-    }, 2000);
-  };
+      setProcessing(false)
+      onUpgrade(tier.id)
+    }, 2000)
+  }
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="glass-card rounded-[16px] p-5">
@@ -89,9 +89,9 @@ export default function X402PaymentGate({ onUpgrade, isConnected, walletAddress,
 
       <div className="space-y-2">
         {TIERS.map((tier) => {
-          const Icon = tier.icon;
-          const price = isCRMHolder ? tier.crmPrice : tier.price;
-          const isSelected = selectedTier === tier.id;
+          const Icon = tier.icon
+          const price = isCRMHolder ? tier.crmPrice : tier.price
+          const isSelected = selectedTier === tier.id
 
           return (
             <div
@@ -109,9 +109,7 @@ export default function X402PaymentGate({ onUpgrade, isConnected, walletAddress,
                   <span className="text-[13px] font-semibold text-[#F1F1F6]">{tier.name}</span>
                 </div>
                 <div className="text-right">
-                  <span className="text-[14px] font-bold text-[#F1F1F6] font-mono">
-                    ${price.toFixed(2)}
-                  </span>
+                  <span className="text-[14px] font-bold text-[#F1F1F6] font-mono">${price.toFixed(2)}</span>
                   <span className="text-[9px] text-[#5C6080] ml-1">{tier.scans}</span>
                 </div>
               </div>
@@ -123,12 +121,12 @@ export default function X402PaymentGate({ onUpgrade, isConnected, walletAddress,
                 ))}
               </div>
             </div>
-          );
+          )
         })}
       </div>
 
       <button
-        onClick={() => selectedTier && handlePay(TIERS.find(t => t.id === selectedTier)!)}
+        onClick={() => selectedTier && handlePay(TIERS.find((t) => t.id === selectedTier)!)}
         disabled={!selectedTier || !isConnected || processing}
         className="btn btn-primary w-full mt-3"
       >
@@ -149,5 +147,5 @@ export default function X402PaymentGate({ onUpgrade, isConnected, walletAddress,
         Powered by x402 protocol. Payments in USDC on Base/Solana.
       </p>
     </motion.div>
-  );
+  )
 }

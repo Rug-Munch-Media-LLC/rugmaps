@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+/* ─── Design Tokens ──────────────────────────────────────────── */
+@theme {
+  --color-surface: #0C1220;
+  --color-surface-alt: #0f0f14;
+  --color-border-subtle: rgba(255, 255, 255, 0.05);
+  --color-border-active: rgba(139, 92, 246, 0.2);
+  --color-text-primary: #F1F1F6;
+  --color-text-secondary: #9DA0B0;
+  --color-text-muted: #5C6080;
+  --color-accent: #8B5CF6;
+  --color-accent-hover: #7C3AED;
+  --color-danger: #FF3366;
+  --color-warning: #FF9800;
+  --color-success: #10B981;
+  --color-info: #28CBF4;
+}
+
+/* ─── Base Styles ────────────────────────────────────────────── */
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background: #08080e;
+  color: #F1F1F6;
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: -0.011em;
+  line-height: 1.5;
+}
+
+/* ─── Utility Classes ────────────────────────────────────────── */
+.glass-card {
+  background: linear-gradient(135deg, rgba(16, 16, 28, 0.6), rgba(10, 10, 18, 0.7));
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(139, 92, 246, 0.08);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-weight: 600;
+  border-radius: 10px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
+}
+
+.btn-ghost {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: #9DA0B0;
+}
+
+.btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(139, 92, 246, 0.2);
+  color: #F1F1F6;
+}
+
+.btn-sm {
+  padding: 8px 14px;
+  font-size: 12px;
+}
+
+/* ─── Animations ─────────────────────────────────────────────── */
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+@keyframes shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s infinite;
+}

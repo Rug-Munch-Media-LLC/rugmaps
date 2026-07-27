@@ -1,21 +1,22 @@
-import { useState } from 'react';
-import { motion } from 'framer-motion';
-import { Download, Share2, FileJson, FileText, CheckCircle2, Copy, ExternalLink } from 'lucide-react';
+import { motion } from 'framer-motion'
+import { CheckCircle2, Copy, Download, ExternalLink, FileJson, Share2 } from 'lucide-react'
+import { useState } from 'react'
+import type { AIAnalysisResult, RugMapsReport, ScanResult, SentinelResult } from '@/types'
 
 interface ExportPanelProps {
-  tokenAddress: string;
-  chain: string;
-  scanData: any;
-  aiResult: any;
-  sentinelResult: any;
+  tokenAddress: string
+  chain: string
+  scanData: ScanResult
+  aiResult: AIAnalysisResult
+  sentinelResult: SentinelResult
 }
 
 export default function ExportPanel({ tokenAddress, chain, scanData, aiResult, sentinelResult }: ExportPanelProps) {
-  const [exported, setExported] = useState(false);
-  const [shareUrl, setShareUrl] = useState('');
+  const [exported, setExported] = useState(false)
+  const [shareUrl, setShareUrl] = useState('')
 
   const generateJSON = () => {
-    const report = {
+    const report: RugMapsReport = {
       version: '2.5',
       generated_at: new Date().toISOString(),
       token: { address: tokenAddress, chain },
@@ -23,25 +24,25 @@ export default function ExportPanel({ tokenAddress, chain, scanData, aiResult, s
       ai_analysis: aiResult,
       sentinel: sentinelResult,
       hash: '', // SHA-256 of report for verification
-    };
-    
-    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `rugmaps-report-${tokenAddress.slice(0, 8)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setExported(true);
-    setTimeout(() => setExported(false), 3000);
-  };
+    }
+
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `rugmaps-report-${tokenAddress.slice(0, 8)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+    setExported(true)
+    setTimeout(() => setExported(false), 3000)
+  }
 
   const generateShareLink = () => {
     // In production: upload to R2, return shareable URL
-    const mockUrl = `https://rugmunch.io/report/${tokenAddress.slice(0, 16)}`;
-    setShareUrl(mockUrl);
-    navigator.clipboard.writeText(mockUrl);
-  };
+    const mockUrl = `https://rugmunch.io/report/${tokenAddress.slice(0, 16)}`
+    setShareUrl(mockUrl)
+    navigator.clipboard.writeText(mockUrl)
+  }
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="glass-card rounded-[16px] p-5">
@@ -80,5 +81,5 @@ export default function ExportPanel({ tokenAddress, chain, scanData, aiResult, s
         </div>
       )}
     </motion.div>
-  );
+  )
 }

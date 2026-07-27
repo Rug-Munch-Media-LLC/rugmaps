@@ -1,24 +1,24 @@
-import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { Shield, AlertTriangle, ShieldCheck, Loader2, AlertTriangle, Lock, Unlock, Eye, Code } from 'lucide-react';
-import { sentinelScan, type SentinelScanResult, getRiskColor, getRiskLabel } from '@/services/rugmapsSentinelBridge';
+import { motion } from 'framer-motion'
+import { AlertTriangle, Code, Eye, Loader2, Lock, Shield, ShieldCheck, Unlock } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { getRiskColor, getRiskLabel, type SentinelScanResult, sentinelScan } from '@/services/rugmapsSentinelBridge'
 
 interface SentinelRiskMeterProps {
-  tokenAddress: string;
-  chain: string;
+  tokenAddress: string
+  chain: string
 }
 
 export default function SentinelRiskMeter({ tokenAddress, chain }: SentinelRiskMeterProps) {
-  const [result, setResult] = useState<SentinelScanResult | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<SentinelScanResult | null>(null)
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (!tokenAddress) return;
-    setLoading(true);
+    if (!tokenAddress) return
+    setLoading(true)
     sentinelScan(tokenAddress, chain)
       .then(setResult)
-      .finally(() => setLoading(false));
-  }, [tokenAddress, chain]);
+      .finally(() => setLoading(false))
+  }, [tokenAddress, chain])
 
   if (loading) {
     return (
@@ -26,20 +26,16 @@ export default function SentinelRiskMeter({ tokenAddress, chain }: SentinelRiskM
         <Loader2 className="w-5 h-5 text-[#FF3366] animate-spin mr-2" />
         <span className="text-[12px] text-[#9DA0B0]">SENTINEL scanning contract...</span>
       </div>
-    );
+    )
   }
 
-  if (!result) return null;
+  if (!result) return null
 
-  const riskColor = getRiskColor(result.risk_score);
-  const riskLabel = getRiskLabel(result.risk_level);
+  const riskColor = getRiskColor(result.risk_score)
+  const riskLabel = getRiskLabel(result.risk_level)
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="glass-card rounded-[16px] p-5"
-    >
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="glass-card rounded-[16px] p-5">
       <div className="flex items-center gap-2.5 mb-4">
         <div className="w-8 h-8 rounded-[9px] bg-[#FF3366]/10 flex items-center justify-center">
           <Shield className="w-[15px] h-[15px] text-[#FF3366]" />
@@ -113,10 +109,27 @@ export default function SentinelRiskMeter({ tokenAddress, chain }: SentinelRiskM
             <span className="text-[12px] font-semibold text-[#FF3366]">Honeypot Detected</span>
           </div>
           <div className="grid grid-cols-2 gap-2 text-[11px]">
-            <div className="text-[#9DA0B0]">Can Sell: <span className={result.honeypot_details.can_sell ? 'text-emerald-400' : 'text-[#FF3366]'}>{result.honeypot_details.can_sell ? 'Yes' : 'NO'}</span></div>
-            <div className="text-[#9DA0B0]">Buy Tax: <span className="text-[#F1F1F6]">{result.honeypot_details.buy_tax.toFixed(1)}%</span></div>
-            <div className="text-[#9DA0B0]">Sell Tax: <span className={result.honeypot_details.sell_tax > 50 ? 'text-[#FF3366]' : 'text-[#F1F1F6]'}>{result.honeypot_details.sell_tax.toFixed(1)}%</span></div>
-            <div className="text-[#9DA0B0]">Blacklist: <span className={result.honeypot_details.has_blacklist ? 'text-[#FF3366]' : 'text-emerald-400'}>{result.honeypot_details.has_blacklist ? 'Yes' : 'No'}</span></div>
+            <div className="text-[#9DA0B0]">
+              Can Sell:{' '}
+              <span className={result.honeypot_details.can_sell ? 'text-emerald-400' : 'text-[#FF3366]'}>
+                {result.honeypot_details.can_sell ? 'Yes' : 'NO'}
+              </span>
+            </div>
+            <div className="text-[#9DA0B0]">
+              Buy Tax: <span className="text-[#F1F1F6]">{result.honeypot_details.buy_tax.toFixed(1)}%</span>
+            </div>
+            <div className="text-[#9DA0B0]">
+              Sell Tax:{' '}
+              <span className={result.honeypot_details.sell_tax > 50 ? 'text-[#FF3366]' : 'text-[#F1F1F6]'}>
+                {result.honeypot_details.sell_tax.toFixed(1)}%
+              </span>
+            </div>
+            <div className="text-[#9DA0B0]">
+              Blacklist:{' '}
+              <span className={result.honeypot_details.has_blacklist ? 'text-[#FF3366]' : 'text-emerald-400'}>
+                {result.honeypot_details.has_blacklist ? 'Yes' : 'No'}
+              </span>
+            </div>
           </div>
         </div>
       )}
@@ -143,17 +156,31 @@ export default function SentinelRiskMeter({ tokenAddress, chain }: SentinelRiskM
         </div>
       )}
     </motion.div>
-  );
+  )
 }
 
-function SecurityBadge({ icon: Icon, label, status, good, invert }: { icon: any; label: string; status: boolean; good: boolean; invert?: boolean }) {
-  const isGood = invert ? !status : status;
+function SecurityBadge({
+  icon: Icon,
+  label,
+  status,
+  good,
+  invert,
+}: {
+  icon: any
+  label: string
+  status: boolean
+  good: boolean
+  invert?: boolean
+}) {
+  const isGood = invert ? !status : status
   return (
-    <div className={`flex items-center gap-2 p-2 rounded-[8px] ${
-      isGood ? 'bg-emerald-500/5 border border-emerald-500/10' : 'bg-[#FF3366]/5 border border-[#FF3366]/10'
-    }`}>
+    <div
+      className={`flex items-center gap-2 p-2 rounded-[8px] ${
+        isGood ? 'bg-emerald-500/5 border border-emerald-500/10' : 'bg-[#FF3366]/5 border border-[#FF3366]/10'
+      }`}
+    >
       <Icon className={`w-4 h-4 ${isGood ? 'text-emerald-400' : 'text-[#FF3366]'}`} />
       <span className={`text-[11px] ${isGood ? 'text-emerald-400' : 'text-[#FF3366]'}`}>{label}</span>
     </div>
-  );
+  )
 }

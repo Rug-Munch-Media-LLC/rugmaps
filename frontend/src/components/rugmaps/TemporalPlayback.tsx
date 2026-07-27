@@ -1,71 +1,67 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
-import { motion } from 'framer-motion';
-import { Play, Pause, SkipBack, SkipForward, Clock, Zap, Users, AlertTriangle } from 'lucide-react';
+import { motion } from 'framer-motion'
+import { AlertTriangle, Clock, Pause, Play, SkipBack, SkipForward, Users, Zap } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 interface TimelineFrame {
-  timestamp: number;
-  holderCount: number;
-  topHolders: Array<{ address: string; pct: number }>;
-  events: Array<{ type: 'launch' | 'sniper' | 'bundle' | 'rug' | 'whale'; description: string }>;
-  riskScore: number;
+  timestamp: number
+  holderCount: number
+  topHolders: Array<{ address: string; pct: number }>
+  events: Array<{ type: 'launch' | 'sniper' | 'bundle' | 'rug' | 'whale'; description: string }>
+  riskScore: number
 }
 
 interface TemporalPlaybackProps {
-  frames: TimelineFrame[];
-  onFrameChange?: (frame: TimelineFrame) => void;
+  frames: TimelineFrame[]
+  onFrameChange?: (frame: TimelineFrame) => void
 }
 
 export default function TemporalPlayback({ frames, onFrameChange }: TemporalPlaybackProps) {
-  const [currentFrame, setCurrentFrame] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [speed, setSpeed] = useState(1);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [currentFrame, setCurrentFrame] = useState(0)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [speed, setSpeed] = useState(1)
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const frame = frames[currentFrame] || null;
+  const frame = frames[currentFrame] || null
 
   const play = useCallback(() => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
+    if (intervalRef.current) clearInterval(intervalRef.current)
     intervalRef.current = setInterval(() => {
-      setCurrentFrame(prev => {
-        const next = prev + 1;
+      setCurrentFrame((prev) => {
+        const next = prev + 1
         if (next >= frames.length) {
-          setIsPlaying(false);
-          return prev;
+          setIsPlaying(false)
+          return prev
         }
-        return next;
-      });
-    }, 1000 / speed);
-  }, [frames.length, speed]);
+        return next
+      })
+    }, 1000 / speed)
+  }, [frames.length, speed])
 
   const pause = useCallback(() => {
     if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
+      clearInterval(intervalRef.current)
+      intervalRef.current = null
     }
-  }, []);
+  }, [])
 
   useEffect(() => {
-    if (isPlaying) play();
-    else pause();
-    return () => pause();
-  }, [isPlaying, play, pause]);
+    if (isPlaying) play()
+    else pause()
+    return () => pause()
+  }, [isPlaying, play, pause])
 
   useEffect(() => {
-    if (frame && onFrameChange) onFrameChange(frame);
-  }, [currentFrame, frame, onFrameChange]);
+    if (frame && onFrameChange) onFrameChange(frame)
+  }, [currentFrame, frame, onFrameChange])
 
-  if (!frames.length) return null;
+  if (!frames.length) return null
 
-  const progress = ((currentFrame + 1) / frames.length) * 100;
-  const dateStr = frame ? new Date(frame.timestamp).toLocaleDateString() : '';
-  const timeStr = frame ? new Date(frame.timestamp).toLocaleTimeString() : '';
+  const progress = ((currentFrame + 1) / frames.length) * 100
+  const dateStr = frame ? new Date(frame.timestamp).toLocaleDateString() : ''
+  const timeStr = frame ? new Date(frame.timestamp).toLocaleTimeString() : ''
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="glass-card rounded-[16px] p-5"
-    >
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="glass-card rounded-[16px] p-5">
       <div className="flex items-center gap-2.5 mb-4">
         <div className="w-8 h-8 rounded-[9px] bg-cyan-500/10 flex items-center justify-center">
           <Clock className="w-[15px] h-[15px] text-cyan-400" />
@@ -78,11 +74,12 @@ export default function TemporalPlayback({ frames, onFrameChange }: TemporalPlay
 
       {/* Timeline Scrubber */}
       <div className="mb-4">
-        <div className="h-2 rounded-full bg-[rgba(255,255,255,0.05)] overflow-hidden cursor-pointer"
+        <div
+          className="h-2 rounded-full bg-[rgba(255,255,255,0.05)] overflow-hidden cursor-pointer"
           onClick={(e) => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            const pct = (e.clientX - rect.left) / rect.width;
-            setCurrentFrame(Math.floor(pct * (frames.length - 1)));
+            const rect = e.currentTarget.getBoundingClientRect()
+            const pct = (e.clientX - rect.left) / rect.width
+            setCurrentFrame(Math.floor(pct * (frames.length - 1)))
           }}
         >
           <motion.div
@@ -93,14 +90,19 @@ export default function TemporalPlayback({ frames, onFrameChange }: TemporalPlay
         </div>
         <div className="flex justify-between mt-1 text-[9px] text-[#5C6080]">
           <span>Launch</span>
-          <span>{dateStr} {timeStr}</span>
+          <span>
+            {dateStr} {timeStr}
+          </span>
           <span>Now</span>
         </div>
       </div>
 
       {/* Controls */}
       <div className="flex items-center gap-3 mb-4">
-        <button onClick={() => setCurrentFrame(0)} className="p-2 rounded-[8px] hover:bg-[rgba(255,255,255,0.05)] text-[#5C6080]">
+        <button
+          onClick={() => setCurrentFrame(0)}
+          className="p-2 rounded-[8px] hover:bg-[rgba(255,255,255,0.05)] text-[#5C6080]"
+        >
           <SkipBack className="w-4 h-4" />
         </button>
         <button
@@ -109,11 +111,14 @@ export default function TemporalPlayback({ frames, onFrameChange }: TemporalPlay
         >
           {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
         </button>
-        <button onClick={() => setCurrentFrame(Math.min(frames.length - 1, currentFrame + 10))} className="p-2 rounded-[8px] hover:bg-[rgba(255,255,255,0.05)] text-[#5C6080]">
+        <button
+          onClick={() => setCurrentFrame(Math.min(frames.length - 1, currentFrame + 10))}
+          className="p-2 rounded-[8px] hover:bg-[rgba(255,255,255,0.05)] text-[#5C6080]"
+        >
           <SkipForward className="w-4 h-4" />
         </button>
         <div className="flex items-center gap-1 ml-auto">
-          {[0.5, 1, 2, 4].map(s => (
+          {[0.5, 1, 2, 4].map((s) => (
             <button
               key={s}
               onClick={() => setSpeed(s)}
@@ -134,7 +139,9 @@ export default function TemporalPlayback({ frames, onFrameChange }: TemporalPlay
           </div>
           <div className="p-2.5 rounded-[10px] bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.04)]">
             <div className="text-[10px] text-[#5C6080] mb-1">Risk</div>
-            <div className={`text-[14px] font-bold font-mono ${frame.riskScore >= 70 ? 'text-[#FF3366]' : frame.riskScore >= 40 ? 'text-[#F59E0B]' : 'text-emerald-400'}`}>
+            <div
+              className={`text-[14px] font-bold font-mono ${frame.riskScore >= 70 ? 'text-[#FF3366]' : frame.riskScore >= 40 ? 'text-[#F59E0B]' : 'text-emerald-400'}`}
+            >
               {frame.riskScore}/100
             </div>
           </div>
@@ -161,5 +168,5 @@ export default function TemporalPlayback({ frames, onFrameChange }: TemporalPlay
         </div>
       )}
     </motion.div>
-  );
+  )
 }
