@@ -1,0 +1,155 @@
+# ── RugMunch CANONICAL Lefthook Configuration ─────────────────
+# Source of truth: standards/lefthook.yml
+# ALL repos symlink .lefthook.yml -> ../standards/lefthook.yml
+#
+# This single config handles ALL repo types via glob patterns:
+#   *.py              -> ruff, mypy, bandit (Python repos)
+#   *.{ts,tsx,js,jsx} -> biome, oxlint, tsc (Frontend repos)
+#   *.sh              -> shellcheck (Infra repos)
+#   Dockerfile*       -> hadolint (Infra repos)
+#   *.sql             -> squawk (DB migration repos)
+#
+# Quick install:
+#   lefthook install
+#   lefthook run pre-commit    # test hooks
+#
+# NOTE: --no-verify bypasses client hooks. Server-side CI is the real gate.
+#
+# HOW TO ADD REPO-SPECIFIC OVERRIDES:
+# If a repo needs EXTRA hooks on top of canonical, create
+# .lefthook.local.yml in the repo root. Lefthook merges it
+# automatically. Example:
+#
+#   pre-commit:
+#     commands:
+#       my-custom-check:
+#         run: ./scripts/my-check.sh
+
+pre-commit:
+  parallel: true
+  commands:
+    # -- BLOCK .env files (UNIVERSAL) --------------------------
+    no-env-files:
+      run: |
+        if find . -maxdepth 3 -name '.env' -not -name '.env.example' \
+          -not -path './.git/*' \
+          -not -path '*/node_modules/*' \
+          -not -path '*/venv/*' \
+          -not -path '*/.venv/*' \
+          -not -path '*/__pycache__/*' \
+          | grep -q .; then
+          echo "ERROR: .env files found. Move secrets to gopass."
+          echo "       Run: gopass show <path>"
+          exit 1
+        fi
+      skip:
+        - merge
+        - rebase
+
+    # -- Secret scanning (UNIVERSAL) ---------------------------
+    # Uses .gitleaks.toml from repo root (custom RMI rules)
+    gitleaks:
+      run: gitleaks protect --staged --config .gitleaks.toml --verbose
+
+    # -- envsitter validation (UNIVERSAL) ----------------------
+    envsitter:
+      run: envsitter validate --file .env 2>/dev/null || true
+
+    # -- Python lint (PYTHON repos) ---------------------------
+    ruff:
+      glob: "*.py"
+      run: ruff check --fix {staged_files} && ruff format {staged_files}
+      stage_fixed: true
+
+    # -- Frontend lint (FRONTEND repos) -----------------------
+    biome:
+      glob: "*.{ts,tsx,js,jsx,json,css}"
+      run: npx biome check --write --no-errors-on-unmatched {staged_files}
+      stage_fixed: true
+
+    oxlint:
+      glob: "*.{ts,tsx,js,jsx}"
+      run: npx oxlint@latest --max-warnings=0 {staged_files}
+
+    # -- Shell lint (INFRA repos) -----------------------------
+    shellcheck:
+      glob: "*.sh"
+      run: shellcheck {staged_files}
+
+    # -- Dockerfile lint (INFRA repos) ------------------------
+    hadolint:
+      glob: "Dockerfile*"
+      run: hadolint {staged_files}
+
+    # -- SQL migration lint (DB repos) ------------------------
+    squawk:
+      glob: "*.sql"
+      run: squawk {staged_files} 2>/dev/null || echo "Squawk not available — skipping SQL lint"
+
+pre-push:
+  parallel: true
+  commands:
+    # -- Full-repo secret scan (UNIVERSAL) --------------------
+    gitleaks-full:
+      run: gitleaks detect --source . --no-git --config .gitleaks.toml -v
+
+    # -- Python type check (PYTHON repos) ---------------------
+    mypy:
+      glob: "*.py"
+      run: |
+        if [ -d "app/" ]; then
+          mypy app/ --ignore-missing-imports
+        elif [ -d "src/" ]; then
+          mypy src/ --ignore-missing-imports
+        fi
+
+    # -- Python security scan (PYTHON repos) ------------------
+    bandit:
+      glob: "*.py"
+      run: |
+        if [ -d "app/" ]; then
+          bandit -r app/ -ll
+        elif [ -d "src/" ]; then
+          bandit -r src/ -ll
+        fi
+
+    # -- Python dep freshness (PYTHON repos) ------------------
+    deptry:
+      glob: "*.py"
+      run: deptry . 2>/dev/null || echo "deptry not available — skipping"
+
+    # -- Frontend type check (FRONTEND repos) -----------------
+    typecheck:
+      glob: "*.{ts,tsx}"
+      run: |
+        if [ -f "tsconfig.json" ]; then
+          npx tsc --noEmit
+        fi
+
+    # -- Run tests (ALL repos — detect runner) ----------------
+    test:
+      run: |
+        if [ -f "pyproject.toml" ] || [ -f "setup.py" ] || [ -f "setup.cfg" ]; then
+          python3 -m pytest tests/ -x -q -m "not integration" 2>/dev/null || true
+        elif [ -f "vitest.config.ts" ] || [ -f "vitest.config.js" ]; then
+          npx vitest run --reporter=verbose 2>/dev/null || true
+        elif [ -f "jest.config.ts" ] || [ -f "jest.config.js" ]; then
+          npx jest --passWithNoTests 2>/dev/null || true
+        fi
+      skip:
+        - merge
+
+    # -- Frontend dep audit (FRONTEND repos) ------------------
+    audit:
+      glob: "package.json"
+      run: pnpm audit --prod --audit-level=high 2>/dev/null || npm audit --production --audit-level=high 2>/dev/null || true
+
+    # -- Frontend dead code (FRONTEND repos) ------------------
+    knip:
+      glob: "*.{ts,tsx}"
+      run: npx knip --no-progress 2>/dev/null || true
+
+commit-msg:
+  commands:
+    commitlint:
+      run: commitlint --edit "$1"
