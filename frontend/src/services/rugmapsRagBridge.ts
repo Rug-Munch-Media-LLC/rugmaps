@@ -8,6 +8,11 @@ export interface RAGSearchResult {
   relevance_score: number
   source: string
   timestamp: number
+  metadata?: {
+    scam_type?: string
+  }
+  excerpt?: string
+  score?: number
 }
 
 export interface DeployerRisk {
@@ -16,6 +21,11 @@ export interface DeployerRisk {
   previous_tokens: number
   rugged_tokens: number
   flags: string[]
+  deployment_count: number
+  previous_rugs: number
+  mixer_funded: boolean
+  rapid_deploy: boolean
+  verdict: string
 }
 
 export async function searchRAG(

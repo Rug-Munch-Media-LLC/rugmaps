@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { AlertTriangle, Code, Eye, Loader2, Lock, Shield, ShieldCheck, Unlock } from 'lucide-react'
+import { AlertTriangle, Eye, Loader2, Lock, Shield, ShieldCheck, Unlock } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { getRiskColor, getRiskLabel, type SentinelScanResult, sentinelScan } from '@/services/rugmapsSentinelBridge'
 
@@ -78,25 +78,21 @@ export default function SentinelRiskMeter({ tokenAddress, chain }: SentinelRiskM
           icon={result.contract_verified ? ShieldCheck : AlertTriangle}
           label="Verified"
           status={result.contract_verified}
-          good={true}
         />
         <SecurityBadge
           icon={result.ownership_renounced ? Lock : Unlock}
           label="Ownership"
           status={result.ownership_renounced}
-          good={true}
         />
         <SecurityBadge
           icon={result.liquidity_locked ? Lock : Unlock}
           label="Liquidity Locked"
           status={result.liquidity_locked}
-          good={true}
         />
         <SecurityBadge
           icon={result.is_honeypot ? AlertTriangle : ShieldCheck}
           label="Honeypot"
           status={!result.is_honeypot}
-          good={true}
           invert={true}
         />
       </div>
@@ -163,13 +159,11 @@ function SecurityBadge({
   icon: Icon,
   label,
   status,
-  good,
   invert,
 }: {
   icon: any
   label: string
   status: boolean
-  good: boolean
   invert?: boolean
 }) {
   const isGood = invert ? !status : status

@@ -206,7 +206,7 @@ export default function RAGIntelligencePanel({ tokenAddress, chain, deployerAddr
                         <div className="flex-1">
                           <p className="text-[11px] text-[#9DA0B0] leading-relaxed">{doc.excerpt}</p>
                           <div className="flex items-center gap-2 mt-1.5">
-                            <span className="text-[9px] text-[#5C6080]">Score: {doc.score.toFixed(2)}</span>
+                            <span className="text-[9px] text-[#5C6080]">Score: {doc.score?.toFixed(2) ?? '?'}</span>
                             {doc.metadata?.scam_type && (
                               <span className="text-[9px] text-[#5C6080] bg-[rgba(255,255,255,0.03)] px-1.5 py-0.5 rounded">
                                 {doc.metadata.scam_type}

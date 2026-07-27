@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { AlertTriangle, ArrowRight, Fuel, GitBranch, Landmark, Loader2, Wallet, Wind } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Fuel, Landmark, Loader2, Wallet, Wind } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 interface FundingNode {
@@ -23,10 +23,13 @@ interface GasFundingTracerProps {
   deployerAddress?: string
 }
 
-export default function GasFundingTracer({ tokenAddress, chain, deployerAddress }: GasFundingTracerProps) {
+export default function GasFundingTracer({
+  tokenAddress: _tokenAddress,
+  chain,
+  deployerAddress,
+}: GasFundingTracerProps) {
   const [path, setPath] = useState<FundingPath | null>(null)
   const [loading, setLoading] = useState(false)
-  const [expanded, setExpanded] = useState(false)
 
   useEffect(() => {
     if (!deployerAddress) return
@@ -102,7 +105,7 @@ export default function GasFundingTracer({ tokenAddress, chain, deployerAddress 
       {/* Path Visualization */}
       <div className="flex items-center gap-1 mb-4 overflow-x-auto pb-2">
         {path.nodes.map((node, i) => {
-          const config = typeConfig[node.type]
+          const config = typeConfig[node.type]!
           const Icon = config.icon
           return (
             <div key={i} className="flex items-center gap-1 flex-shrink-0">

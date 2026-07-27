@@ -1,11 +1,25 @@
 // [REVIEW] Stub — replace with real Sentinel API integration
 // This bridge connects the frontend to the backend Sentinel scanning service.
 
+export interface HoneypotDetails {
+  can_sell: boolean
+  buy_tax: number
+  sell_tax: number
+  has_blacklist: boolean
+}
+
 export interface SentinelScanResult {
   risk_score: number
   risk_level: string
+  contract_verified: boolean
+  ownership_renounced: boolean
+  liquidity_locked: boolean
+  is_honeypot: boolean
+  honeypot_details: HoneypotDetails
+  flags: string[]
+  verdict: string
   // biome-ignore lint/suspicious/noExplicitAny: API response shape varies by chain
-  details: any
+  details?: any
 }
 
 export function getRiskColor(score: number): string {

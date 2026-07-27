@@ -153,9 +153,9 @@ export default function TemporalPlayback({ frames, onFrameChange }: TemporalPlay
       )}
 
       {/* Events */}
-      {frame?.events.length > 0 && (
+      {frame?.events && frame.events.length > 0 && (
         <div className="mt-3 space-y-1.5">
-          {frame.events.slice(0, 3).map((event, i) => (
+          {frame!.events.slice(0, 3).map((event, i) => (
             <div key={i} className="flex items-center gap-2 text-[11px]">
               {event.type === 'sniper' && <Zap className="w-3.5 h-3.5 text-[#F59E0B]" />}
               {event.type === 'bundle' && <Users className="w-3.5 h-3.5 text-[#8B5CF6]" />}

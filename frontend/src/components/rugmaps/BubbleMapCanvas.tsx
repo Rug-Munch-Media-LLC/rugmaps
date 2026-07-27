@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react'
 
-interface BubbleNode {
+export interface BubbleNode {
   id: string
   address: string
   label?: string
@@ -17,14 +17,14 @@ interface BubbleNode {
   clusterId?: string
 }
 
-interface BubbleLink {
+export interface BubbleLink {
   source: string
   target: string
   value: number // strength
   transactions?: number
 }
 
-interface BubbleMapData {
+export interface BubbleMapData {
   nodes: BubbleNode[]
   links: BubbleLink[]
   risk_score?: number
@@ -70,7 +70,6 @@ export default function BubbleMapCanvas({ data, chain, width = 800, height = 500
   const hoverRef = useRef<BubbleNode | null>(null)
   const mouseRef = useRef({ x: 0, y: 0 })
   const panRef = useRef({ x: 0, y: 0, scale: 1 })
-  const draggingRef = useRef(false)
 
   const draw = useCallback(
     (ctx: CanvasRenderingContext2D, nodes: BubbleNode[], links: BubbleLink[], w: number, h: number) => {
@@ -87,7 +86,8 @@ export default function BubbleMapCanvas({ data, chain, width = 800, height = 500
       for (const link of links) {
         const src = nodes.find((n) => n.id === link.source)
         const tgt = nodes.find((n) => n.id === link.target)
-        if (!src || !tgt || src.x === undefined || tgt.x === undefined) continue
+        if (!src || !tgt || src.x === undefined || src.y === undefined || tgt.x === undefined || tgt.y === undefined)
+          continue
 
         const strength = Math.min(1, link.value / 10)
         ctx.strokeStyle = `rgba(139, 92, 246, ${0.08 + strength * 0.2})`
@@ -238,17 +238,21 @@ export default function BubbleMapCanvas({ data, chain, width = 800, height = 500
 
       // Repulsion between all nodes
       for (let i = 0; i < nodes.length; i++) {
+        const ni = nodes[i]
+        if (!ni) continue
         for (let j = i + 1; j < nodes.length; j++) {
-          const dx = (nodes[j].x || 0) - (nodes[i].x || 0)
-          const dy = (nodes[j].y || 0) - (nodes[i].y || 0)
+          const nj = nodes[j]
+          if (!nj) continue
+          const dx = (nj.x || 0) - (ni.x || 0)
+          const dy = (nj.y || 0) - (ni.y || 0)
           const dist = Math.sqrt(dx * dx + dy * dy) || 1
           const force = (a * 500) / (dist * dist)
           const fx = (dx / dist) * force
           const fy = (dy / dist) * force
-          ;(nodes[i].vx as number) = ((nodes[i].vx || 0) - fx) * 0.9
-          ;(nodes[i].vy as number) = ((nodes[i].vy || 0) - fy) * 0.9
-          ;(nodes[j].vx as number) = ((nodes[j].vx || 0) + fx) * 0.9
-          ;(nodes[j].vy as number) = ((nodes[j].vy || 0) + fy) * 0.9
+          ni.vx = ((ni.vx || 0) - fx) * 0.9
+          ni.vy = ((ni.vy || 0) - fy) * 0.9
+          nj.vx = ((nj.vx || 0) + fx) * 0.9
+          nj.vy = ((nj.vy || 0) + fy) * 0.9
         }
       }
 
@@ -293,7 +297,6 @@ export default function BubbleMapCanvas({ data, chain, width = 800, height = 500
     const links = data.links || []
 
     // Convert to BubbleNodes
-    const maxVal = Math.max(1, ...rawNodes.map((n: any) => n.value || n.supply_pct || n.pct || 1))
     const nodes: BubbleNode[] = rawNodes.map((n: any, i: number) => {
       const addr = n.address || n.id || `addr_${i}`
       const value = n.value || n.supply_pct || n.pct || 1
@@ -338,7 +341,7 @@ export default function BubbleMapCanvas({ data, chain, width = 800, height = 500
     let found: BubbleNode | null = null
 
     for (const node of nodes) {
-      if (node.x === undefined) continue
+      if (node.x === undefined || node.y === undefined) continue
       const sx = node.x * scale + width / 2 + px
       const sy = node.y * scale + height / 2 + py
       const r = nodeRadius(node.value, maxVal) * scale
@@ -353,7 +356,7 @@ export default function BubbleMapCanvas({ data, chain, width = 800, height = 500
     if (canvas) canvas.style.cursor = found ? 'pointer' : 'grab'
   }
 
-  const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleClick = (_e: React.MouseEvent<HTMLCanvasElement>) => {
     const hovered = hoverRef.current
     if (hovered?.address) {
       window.open(getExplorerUrl(chain, hovered.address), '_blank')

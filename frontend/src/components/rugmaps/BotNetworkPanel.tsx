@@ -24,7 +24,7 @@ const KNOWN_BOTS = [
   { name: 'Padre', pattern: 'volume_bot', signature: 'wash_cycle_3s' },
 ]
 
-export default function BotNetworkPanel({ tokenAddress, chain }: BotNetworkPanelProps) {
+export default function BotNetworkPanel({ tokenAddress: _tokenAddress, chain: _chain }: BotNetworkPanelProps) {
   const [bots, setBots] = useState<BotSuite[]>([])
   const [loading, setLoading] = useState(false)
   const [analyzed, setAnalyzed] = useState(false)
@@ -36,7 +36,8 @@ export default function BotNetworkPanel({ tokenAddress, chain }: BotNetworkPanel
       const detected: BotSuite[] = []
       const numBots = Math.floor(Math.random() * 3) + 1
       for (let i = 0; i < numBots; i++) {
-        const bot = KNOWN_BOTS[Math.floor(Math.random() * KNOWN_BOTS.length)]
+        const bot = KNOWN_BOTS[Math.floor(Math.random() * KNOWN_BOTS.length)]!
+        if (!bot) continue
         detected.push({
           name: bot.name,
           confidence: Math.floor(Math.random() * 30) + 70,

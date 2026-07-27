@@ -1,5 +1,5 @@
-import { AnimatePresence, motion } from 'framer-motion'
-import { CheckCircle2, Crown, Loader2, Lock, Sparkles, Wallet, Zap } from 'lucide-react'
+import { motion } from 'framer-motion'
+import { Crown, Loader2, Lock, Sparkles, Wallet, Zap } from 'lucide-react'
 import { useState } from 'react'
 
 interface X402PaymentGateProps {
@@ -42,7 +42,12 @@ const TIERS = [
   },
 ]
 
-export default function X402PaymentGate({ onUpgrade, isConnected, walletAddress, isCRMHolder }: X402PaymentGateProps) {
+export default function X402PaymentGate({
+  onUpgrade,
+  isConnected,
+  walletAddress: _walletAddress,
+  isCRMHolder,
+}: X402PaymentGateProps) {
   const [selectedTier, setSelectedTier] = useState<string | null>(null)
   const [processing, setProcessing] = useState(false)
 

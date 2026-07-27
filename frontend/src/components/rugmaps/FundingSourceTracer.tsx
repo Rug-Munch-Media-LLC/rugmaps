@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowDown, ArrowRight, Building2, ExternalLink, Filter, Search, Shuffle } from 'lucide-react'
+import { AlertTriangle, ArrowRight, ExternalLink } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 export interface FundingHop {
@@ -73,7 +73,7 @@ const KNOWN_MIXERS = new Set([
   'joinmarket',
 ])
 
-function classifyAddress(addr: string, label?: string): FundingHop['from_type'] {
+function classifyAddress(_addr: string, label?: string): FundingHop['from_type'] {
   if (label) {
     const l = label.toLowerCase()
     if (KNOWN_CEX.has(l) || l.includes('exchange') || l.includes('binance') || l.includes('coinbase')) return 'cex'

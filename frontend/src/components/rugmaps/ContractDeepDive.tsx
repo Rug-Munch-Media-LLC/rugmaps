@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { AlertTriangle, CheckCircle2, Code, Eye, FileCode, Lock, Percent, Unlock, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Code, FileCode, Percent, XCircle } from 'lucide-react'
 import { useState } from 'react'
 
 interface ContractFunction {
@@ -16,7 +16,7 @@ interface ContractDeepDiveProps {
   chain: string
 }
 
-export default function ContractDeepDive({ tokenAddress, chain }: ContractDeepDiveProps) {
+export default function ContractDeepDive({ tokenAddress: _tokenAddress, chain: _chain }: ContractDeepDiveProps) {
   const [expanded, setExpanded] = useState(false)
   const [functions, setFunctions] = useState<ContractFunction[]>([])
   const [analyzed, setAnalyzed] = useState(false)

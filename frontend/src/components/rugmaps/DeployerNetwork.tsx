@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, Calendar, ExternalLink, GitBranch, Skull, TrendingDown } from 'lucide-react'
+import { AlertTriangle, Calendar, ExternalLink, GitBranch, Skull, TrendingDown } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 export interface DeployerToken {
@@ -225,8 +225,8 @@ export default function DeployerNetwork({
                       : 'hover:bg-[rgba(139,92,246,0.04)]'
                   }`}
                 >
-                  <span className="text-lg flex-shrink-0" style={{ color: meta.color }}>
-                    {meta.icon}
+                  <span className="text-lg flex-shrink-0" style={{ color: meta!.color }}>
+                    {meta!.icon}
                   </span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
