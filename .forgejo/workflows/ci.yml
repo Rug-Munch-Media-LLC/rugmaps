@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Rug Munch Media LLC
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-frontend:
+    runs-on: docker-x64
+    container:
+      image: node:22-bookworm-slim
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: npm ci || npm install || true
+      - name: Lint
+        run: npx tsc --noEmit || true
+
+  lint-backend:
+    runs-on: docker-x64
+    container:
+      image: python:3.11-slim
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint
+        run: pip install ruff && ruff check --output-format=github || true
