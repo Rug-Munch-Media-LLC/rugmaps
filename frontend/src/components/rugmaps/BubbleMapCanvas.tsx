@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 export interface BubbleNode {
   id: string
@@ -15,6 +15,7 @@ export interface BubbleNode {
   isDev?: boolean
   isBundle?: boolean
   clusterId?: string
+  balance?: number // optional wallet balance in USD
 }
 
 export interface BubbleLink {
@@ -70,6 +71,41 @@ export default function BubbleMapCanvas({ data, chain, width = 800, height = 500
   const hoverRef = useRef<BubbleNode | null>(null)
   const mouseRef = useRef({ x: 0, y: 0 })
   const panRef = useRef({ x: 0, y: 0, scale: 1 })
+  const [legendOpen, setLegendOpen] = useState(true)
+  const [copied, setCopied] = useState(false)
+  const [copiedAddr, setCopiedAddr] = useState(false)
+
+  // Find center node for share URL
+  const centerNode = data?.nodes?.find((n) => n.layer === 0) || data?.nodes?.[0]
+
+  const handleZoomIn = () => {
+    panRef.current.scale = Math.min(4, panRef.current.scale * 1.25)
+  }
+  const handleZoomOut = () => {
+    panRef.current.scale = Math.max(0.2, panRef.current.scale * 0.8)
+  }
+  const handleZoomReset = () => {
+    panRef.current = { x: 0, y: 0, scale: 1 }
+  }
+
+  const handleShare = () => {
+    const addr = centerNode?.address
+    if (!addr) return
+    const url = `${window.location.origin}/rugmaps?address=${encodeURIComponent(addr)}&chain=${encodeURIComponent(chain)}`
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+
+  const handleCopyAddress = () => {
+    const hovered = hoverRef.current
+    if (!hovered?.address) return
+    navigator.clipboard.writeText(hovered.address).then(() => {
+      setCopiedAddr(true)
+      setTimeout(() => setCopiedAddr(false), 2000)
+    })
+  }
 
   const draw = useCallback(
     (ctx: CanvasRenderingContext2D, nodes: BubbleNode[], links: BubbleLink[], w: number, h: number) => {
@@ -174,17 +210,24 @@ export default function BubbleMapCanvas({ data, chain, width = 800, height = 500
         const screenX = mouseRef.current.x
         const screenY = mouseRef.current.y
 
+        const riskLabel = hovered.risk >= 70 ? '🔴 High' : hovered.risk >= 40 ? '🟡 Medium' : '🟢 Low'
+        const shortAddr = hovered.address.length > 12
+          ? hovered.address.slice(0, 6) + '...' + hovered.address.slice(-4)
+          : hovered.address
+
         const lines = [
-          hovered.label || hovered.address.slice(0, 8) + '...' + hovered.address.slice(-4),
-          `Supply: ${hovered.value.toFixed(1)}%`,
+          `📌 ${hovered.label || shortAddr}`,
+          `📊 Supply: ${hovered.value.toFixed(1)}%`,
+          hovered.balance ? `💰 Balance: $${hovered.balance.toLocaleString()}` : '',
+          hovered.clusterId ? `🔗 Cluster: ${hovered.clusterId.slice(0, 8)}...` : '',
           hovered.isDev ? '⚠️ DEV WALLET' : '',
-          hovered.isBundle ? '🕸️ BUNDLE' : '',
-          `Risk: ${hovered.risk}/100`,
-          'Click → Explorer',
+          hovered.isBundle ? '🕸️ BUNDLE WALLET' : '',
+          `⚡ Risk: ${riskLabel} (${hovered.risk}/100)`,
+          '🖱 Click → Explorer | 📋 Click addr to copy',
         ].filter(Boolean)
 
-        const lineHeight = 13
-        const padding = 8
+        const lineHeight = 14
+        const padding = 10
         const tooltipW = Math.max(...lines.map((l) => ctx.measureText(l).width)) + padding * 2
         const tooltipH = lines.length * lineHeight + padding * 2
 
@@ -202,9 +245,17 @@ export default function BubbleMapCanvas({ data, chain, width = 800, height = 500
         ctx.stroke()
 
         ctx.fillStyle = '#fff'
-        ctx.font = '11px monospace'
+        ctx.font = '12px monospace'
         ctx.textAlign = 'left'
         lines.forEach((line, i) => {
+          const isTitle = i === 0
+          if (isTitle) {
+            ctx.fillStyle = '#8B5CF6'
+            ctx.font = 'bold 12px monospace'
+          } else {
+            ctx.fillStyle = line.startsWith('⚠️') || line.startsWith('🕸️') ? '#FF9800' : '#ccc'
+            ctx.font = '11px monospace'
+          }
           ctx.fillText(line, tx + padding, ty + padding + lineHeight * (i + 0.8))
         })
       }
@@ -382,31 +433,105 @@ export default function BubbleMapCanvas({ data, chain, width = 800, height = 500
         onMouseLeave={() => {
           hoverRef.current = null
         }}
-        onClick={handleClick}
+        onClick={(e) => {
+          // Double-click to copy address if hovering a node
+          if (hoverRef.current?.address) {
+            handleCopyAddress()
+          }
+          handleClick(e)
+        }}
         onWheel={handleWheel}
       />
-      {/* Legend Overlay */}
-      <div className="absolute bottom-4 left-4 bg-[#0C1220]/90 backdrop-blur-md border border-white/10 rounded-xl p-3 text-xs space-y-2 pointer-events-none">
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-[#8B5CF6] shadow-[0_0_8px_rgba(139,92,246,0.5)]" />
-          <span className="text-gray-300">Token Contract (Center)</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-[#22C55E] shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
-          <span className="text-gray-300">Low Risk (&lt;30)</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-[#F59E0B] shadow-[0_0_8px_rgba(245,158,11,0.5)]" />
-          <span className="text-gray-300">Medium Risk (30-69)</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-[#EF4444] animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.6)]" />
-          <span className="text-gray-300">High Risk (&ge;70) / Dev</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-[#FF9800] shadow-[0_0_8px_rgba(255,152,0,0.6)]" />
-          <span className="text-gray-300">Bundle Wallet</span>
-        </div>
+
+      {/* Share button — top-right */}
+      {data && centerNode?.address && (
+        <button
+          type="button"
+          onClick={handleShare}
+          className="absolute top-4 right-4 bg-[#0C1220]/80 backdrop-blur-md border border-white/10 hover:border-white/20 rounded-lg px-3 py-1.5 text-xs text-gray-300 hover:text-white transition-all z-10 flex items-center gap-1.5"
+        >
+          {copied ? '✅ Copied!' : '📤 Share'}
+        </button>
+      )}
+
+      {/* Canvas hint */}
+      <div className="absolute top-4 left-4 bg-[#0C1220]/60 backdrop-blur-sm rounded-lg px-2.5 py-1 text-[10px] text-gray-500 pointer-events-none select-none">
+        Scroll to zoom · Drag to pan
+      </div>
+
+      {/* Zoom controls — bottom-right */}
+      <div className="absolute bottom-4 right-4 flex flex-col gap-1 z-10">
+        <button
+          type="button"
+          onClick={handleZoomIn}
+          className="w-8 h-8 bg-[#0C1220]/80 backdrop-blur-md border border-white/10 hover:border-white/30 rounded-lg text-white text-lg font-bold leading-none transition-all hover:bg-[#1a1f2e] flex items-center justify-center"
+          aria-label="Zoom in"
+        >
+          +
+        </button>
+        <button
+          type="button"
+          onClick={handleZoomOut}
+          className="w-8 h-8 bg-[#0C1220]/80 backdrop-blur-md border border-white/10 hover:border-white/30 rounded-lg text-white text-lg font-bold leading-none transition-all hover:bg-[#1a1f2e] flex items-center justify-center"
+          aria-label="Zoom out"
+        >
+          −
+        </button>
+        <button
+          type="button"
+          onClick={handleZoomReset}
+          className="w-8 h-8 bg-[#0C1220]/80 backdrop-blur-md border border-white/10 hover:border-white/30 rounded-lg text-[10px] text-gray-400 font-medium leading-none transition-all hover:bg-[#1a1f2e] flex items-center justify-center"
+          aria-label="Reset zoom"
+        >
+          ⟲
+        </button>
+      </div>
+
+      {/* Legend Overlay — collapsible */}
+      <div className="absolute bottom-4 left-4 z-10">
+        <button
+          type="button"
+          onClick={() => setLegendOpen((v) => !v)}
+          className="bg-[#0C1220]/80 backdrop-blur-md border border-white/10 hover:border-white/20 rounded-lg px-2.5 py-1.5 text-xs text-gray-400 hover:text-white transition-all mb-2"
+        >
+          {legendOpen ? '▼ Legend' : '▲ Legend'} {data?.risk_level ? `· ${data.risk_level}` : ''}
+        </button>
+        {legendOpen && (
+          <div className="bg-[#0C1220]/95 backdrop-blur-md border border-white/10 rounded-xl p-3 text-xs space-y-2">
+            {data?.risk_score !== undefined && (
+              <div className="flex items-center justify-between gap-4 pb-2 border-b border-white/5 mb-1">
+                <span className="text-gray-400 text-[10px] uppercase tracking-wider">Risk Score</span>
+                <span
+                  className={`font-bold text-sm ${
+                    data.risk_score >= 70 ? 'text-[#EF4444]' : data.risk_score >= 40 ? 'text-[#F59E0B]' : 'text-[#22C55E]'
+                  }`}
+                >
+                  {data.risk_score}/100
+                </span>
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-[#8B5CF6] shadow-[0_0_8px_rgba(139,92,246,0.5)]" />
+              <span className="text-gray-300">Token Contract (Center)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-[#22C55E] shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
+              <span className="text-gray-300">Low Risk (&lt;30)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-[#F59E0B] shadow-[0_0_8px_rgba(245,158,11,0.5)]" />
+              <span className="text-gray-300">Medium Risk (30-69)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-[#EF4444] shadow-[0_0_8px_rgba(239,68,68,0.6)]" />
+              <span className="text-gray-300">High Risk (&ge;70) / Dev</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-[#FF9800] shadow-[0_0_8px_rgba(255,152,0,0.6)]" />
+              <span className="text-gray-300">Bundle Wallet</span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
