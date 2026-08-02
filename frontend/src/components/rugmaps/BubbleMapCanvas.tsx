@@ -51,7 +51,7 @@ const EXPLORERS: Record<string, string> = {
 }
 
 function getExplorerUrl(chain: string, address: string): string {
-  const base = EXPLORERS[chain] || EXPLORERS['ethereum']
+  const base = EXPLORERS[chain] || EXPLORERS.ethereum
   return base + address
 }
 
@@ -211,9 +211,10 @@ export default function BubbleMapCanvas({ data, chain, width = 800, height = 500
         const screenY = mouseRef.current.y
 
         const riskLabel = hovered.risk >= 70 ? '🔴 High' : hovered.risk >= 40 ? '🟡 Medium' : '🟢 Low'
-        const shortAddr = hovered.address.length > 12
-          ? hovered.address.slice(0, 6) + '...' + hovered.address.slice(-4)
-          : hovered.address
+        const shortAddr =
+          hovered.address.length > 12
+            ? `${hovered.address.slice(0, 6)}...${hovered.address.slice(-4)}`
+            : hovered.address
 
         const lines = [
           `📌 ${hovered.label || shortAddr}`,
@@ -456,7 +457,7 @@ export default function BubbleMapCanvas({ data, chain, width = 800, height = 500
 
       {/* Canvas hint */}
       <div className="absolute top-4 left-4 bg-[#0C1220]/60 backdrop-blur-sm rounded-lg px-2.5 py-1 text-[10px] text-gray-500 pointer-events-none select-none">
-        Scroll to zoom · Drag to pan
+        {copiedAddr ? '✅ Address copied' : 'Scroll to zoom · Drag to pan'}
       </div>
 
       {/* Zoom controls — bottom-right */}
@@ -503,7 +504,11 @@ export default function BubbleMapCanvas({ data, chain, width = 800, height = 500
                 <span className="text-gray-400 text-[10px] uppercase tracking-wider">Risk Score</span>
                 <span
                   className={`font-bold text-sm ${
-                    data.risk_score >= 70 ? 'text-[#EF4444]' : data.risk_score >= 40 ? 'text-[#F59E0B]' : 'text-[#22C55E]'
+                    data.risk_score >= 70
+                      ? 'text-[#EF4444]'
+                      : data.risk_score >= 40
+                        ? 'text-[#F59E0B]'
+                        : 'text-[#22C55E]'
                   }`}
                 >
                   {data.risk_score}/100

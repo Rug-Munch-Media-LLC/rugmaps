@@ -99,6 +99,8 @@ paths = [
   # Security scanner: rule definitions match private-repo-reference by design
   '''scripts/enterprise-firewall\.py''',
   '''scripts/proprietary-firewall\.py''',
+  # Pre-commit methodology check: detection patterns (scanner, not leak)
+  '''scripts/pre-commit-methodology-check\.sh''',
   # Test fixtures: internal IPs used intentionally
   '''tests/integration/test_scanner_pipeline\.py''',
 ]
