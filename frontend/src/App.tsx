@@ -3,6 +3,49 @@ import { useState } from 'react'
 import { Link, Route, Routes } from 'react-router-dom'
 import type { BubbleMapData } from '@/components/rugmaps/BubbleMapCanvas'
 import BubbleMapCanvas from '@/components/rugmaps/BubbleMapCanvas'
+import type { TokenGraphEdge, TokenGraphNode } from '@/components/rugmaps/TokenGraphCanvas'
+import TokenGraphCanvas from '@/components/rugmaps/TokenGraphCanvas'
+
+/** Deterministic seeded PRNG (mulberry32) so the demo graph is stable across builds. */
+function seededRandom(seed: number): () => number {
+  let state = seed >>> 0
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0
+    let t = state
+    t = Math.imul(t ^ (t >>> 15), t | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+/** Generate a scale-testing graph with a few dense hubs + peripheral holders. */
+function buildDemoTokenGraph(
+  nodeCount: number,
+  edgeCount: number,
+  seed: number,
+): { nodes: TokenGraphNode[]; edges: TokenGraphEdge[] } {
+  const rand = seededRandom(seed)
+  const hubs = Math.max(2, Math.floor(nodeCount * 0.06))
+  const nodes: TokenGraphNode[] = Array.from({ length: nodeCount }, (_, index) => {
+    const isHub = index < hubs
+    return {
+      id: `0x${index.toString(16).padStart(8, '0')}`,
+      label: isHub ? `Hub ${index + 1}` : undefined,
+      size: isHub ? 20 + Math.floor(rand() * 18) : undefined,
+    }
+  })
+  const edges: TokenGraphEdge[] = []
+  for (let index = 0; index < edgeCount; index += 1) {
+    const target = hubs + Math.floor(rand() * (nodeCount - hubs))
+    const source = rand() < 0.65 ? Math.floor(rand() * hubs) : hubs + Math.floor(rand() * (nodeCount - hubs))
+    if (source === target) continue
+    edges.push({ source: nodes[source]?.id ?? '', target: nodes[target]?.id ?? '', value: 1 + Math.floor(rand() * 20) })
+  }
+  return { nodes, edges }
+}
+
+const LARGE_DEMO_GRAPH = buildDemoTokenGraph(400, 1100, 0x5eed)
+const TINY_DEMO_GRAPH = buildDemoTokenGraph(6, 8, 0x51e0)
 
 function HomePage() {
   return (
@@ -146,6 +189,26 @@ function DemoPage() {
           </p>
         </div>
         <BubbleMapCanvas data={data} chain="solana" width={900} height={550} />
+
+        <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <section className="rounded-xl border border-white/5 bg-white/[0.015] p-4">
+            <h2 className="text-sm font-bold mb-1">Large Graph — G6 force-atlas2</h2>
+            <p className="text-[11px] text-[#5C6080] mb-3">
+              {LARGE_DEMO_GRAPH.nodes.length} nodes / {LARGE_DEMO_GRAPH.edges.length} edges · scroll to zoom · drag to
+              pan · hover for details
+            </p>
+            <TokenGraphCanvas nodes={LARGE_DEMO_GRAPH.nodes} edges={LARGE_DEMO_GRAPH.edges} width={860} height={440} />
+          </section>
+
+          <section className="rounded-xl border border-white/5 bg-white/[0.015] p-4">
+            <h2 className="text-sm font-bold mb-1">Tiny Graph — lightweight fallback</h2>
+            <p className="text-[11px] text-[#5C6080] mb-3">
+              {TINY_DEMO_GRAPH.nodes.length} nodes / {TINY_DEMO_GRAPH.edges.length} edges · d3-force layout with all
+              labels
+            </p>
+            <TokenGraphCanvas nodes={TINY_DEMO_GRAPH.nodes} edges={TINY_DEMO_GRAPH.edges} width={860} height={440} />
+          </section>
+        </div>
       </main>
     </div>
   )
