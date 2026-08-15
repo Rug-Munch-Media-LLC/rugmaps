@@ -23,8 +23,8 @@ logger = get_logger(__name__)
 # 172.22.0.1 — NOT 127.0.0.1 (that's the container itself).
 LLAMA_HOST = os.getenv("LLAMA_HOST", "172.22.0.1")
 QWEN_PORT = 8085  # qwen-chat (Qwen3-4B-Abliterated, fast)
-DEEPSEEK_PORT = 8086  # deepseek-analysis (DeepSeek-R1-8B-Abliterated, reasoning)
-AI_MODEL = os.getenv("AI_ANALYSIS_MODEL", "analysis")  # → deepseek-analysis
+DEEPSEEK_PORT = 8086  # qwen-analysis (Qwen3.5-9B, reasoning)
+AI_MODEL = os.getenv("AI_ANALYSIS_MODEL", "analysis")  # → qwen-analysis
 
 # Analysis cache (in-memory + Redis if available)
 _analysis_cache: dict[str, dict] = {}
@@ -171,7 +171,7 @@ async def _call_llama_for_rugmaps(prompt: str, task_type: str = "analysis", max_
 
     Args:
         prompt: The full analysis prompt with token data.
-        task_type: "analysis" → deepseek-analysis (deep reasoning), "chat" → qwen-chat (fast).
+        task_type: "analysis" → qwen-analysis (deep reasoning), "chat" → qwen-chat (fast).
         max_tokens: Max response tokens.
 
     Returns:
