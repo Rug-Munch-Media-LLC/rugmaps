@@ -11,6 +11,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 
@@ -27,6 +28,30 @@ logger = logging.getLogger(__name__)
 APP_NAME = "rugmaps-backend"
 APP_VERSION = "1.0.0"
 APP_DESCRIPTION = "RugMaps — wallet cluster visualization and AI-powered token investigation"
+
+# ── CORS configuration ────────────────────────────────────────────────────
+# Explicit origin allowlist — `allow_origins=["*"]` with
+# `allow_credentials=True` is invalid per the CORS spec (browsers reject
+# wildcard + credentials) and would open the API to any site. Origins are
+# configured via the CORS_ALLOWED_ORIGINS env var (comma-separated);
+# defaults to local development origins. Set CORS_ALLOWED_ORIGINS to the
+# production frontend origin(s) when deploying.
+
+DEFAULT_CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+
+def _cors_allowed_origins() -> list[str]:
+    """Parse CORS_ALLOWED_ORIGINS (comma-separated) or return dev defaults."""
+    raw = os.getenv("CORS_ALLOWED_ORIGINS", "")
+    if raw.strip():
+        return [origin.strip() for origin in raw.split(",") if origin.strip()]
+    return DEFAULT_CORS_ORIGINS
+
 
 # ── Lifespan ──────────────────────────────────────────────────────────────
 
@@ -52,7 +77,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
