@@ -13,14 +13,18 @@ import {
 
 export type { FundingHop } from './fundingTracer'
 
+import { fetchFundFlows, fundFlowsToRawHops } from '@/services/rugmapsApi'
+
 interface FundingTracerProps {
   chain: string
   address: string
+  /** Token the holder map is centered on (required by the live fund-flows route). */
+  tokenAddress?: string
   initialHops?: FundingHop[]
   className?: string
 }
 
-export default function FundingTracer({ chain, address, initialHops, className = '' }: FundingTracerProps) {
+export default function FundingTracer({ chain, address, tokenAddress, initialHops, className = '' }: FundingTracerProps) {
   const [hops, setHops] = useState<FundingHop[]>(initialHops || [])
   const [loading, setLoading] = useState(!initialHops)
   const [depth, setDepth] = useState(3)
@@ -33,23 +37,23 @@ export default function FundingTracer({ chain, address, initialHops, className =
       return
     }
     const fetchHops = async () => {
-      try {
-        const res = await fetch(
-          `/api/v1/investigate/fund-flow?chain=${chain}&address=${encodeURIComponent(address)}&depth=${depth}`,
-        )
-        if (res.ok) {
-          const data = await res.json()
-          const rawHops = data.hops || data.flow || []
-          setHops(normalizeFundingHops(rawHops, address, chain))
-        }
-      } catch (e) {
-        console.error('[FundingTracer] fetch failed:', e)
-      } finally {
-        setLoading(false)
-      }
+      // Live route: GET /api/v1/rugmaps/fund-flows?token&address&chain&hops
+      // (verified 2026-08-21). The old investigate "fund-flow" route never
+      // existed and 404'd silently. The route requires the token the map is
+      // centered on — callers pass tokenAddress; it defaults to the traced
+      // address for standalone use.
+      const data = await fetchFundFlows({
+        token: tokenAddress || address,
+        address,
+        chain,
+        hops: Math.min(2, depth),
+      })
+      const rawHops = fundFlowsToRawHops(data)
+      setHops(normalizeFundingHops(rawHops, address, chain))
+      setLoading(false)
     }
     fetchHops()
-  }, [chain, address, depth, initialHops])
+  }, [chain, address, tokenAddress, depth, initialHops])
 
   // Stats: where did the funding come from?
   const sourceStats = useMemo(() => computeSourceStats(hops), [hops])

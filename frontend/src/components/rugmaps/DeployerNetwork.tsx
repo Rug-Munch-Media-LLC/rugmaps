@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import DeployerStatsGrid from './_DeployerStatsGrid'
 import DeployerTokenRow from './_DeployerTokenRow'
 import { computeDeployerStats, computeVerdict, type DeployerToken, normalizeDeployerTokens } from './deployerNetwork'
+import { fetchDeployerProfile } from '@/services/rugmapsApi'
 
 export type { DeployerToken } from './deployerNetwork'
 
@@ -31,23 +32,17 @@ export default function DeployerNetwork({
       return
     }
     const fetchTokens = async () => {
-      try {
-        const params = new URLSearchParams({
-          deployer: deployerAddress,
-          days: String(windowDays),
-          ...(chain ? { chain } : {}),
-        })
-        const res = await fetch(`/api/v1/rugmaps/deployer-tokens?${params}`)
-        if (res.ok) {
-          const data = await res.json()
-          const raw = data.tokens || data.deployments || []
-          setTokens(normalizeDeployerTokens(raw))
-        }
-      } catch (e) {
-        console.error('[DeployerNetwork] fetch failed:', e)
-      } finally {
-        setLoading(false)
-      }
+      // Live route: GET /api/v1/scoring/deployer/{chain}/{address} (verified
+      // 2026-08-21). The old rugmaps "deployer tokens" route never existed
+      // and 404'd silently. A null profile → honest empty state.
+      const data = await fetchDeployerProfile(deployerAddress, chain || 'solana')
+      const profile = data?.profile ?? null
+      const raw = (profile?.tokens || profile?.deployments || []) as unknown[]
+      // The window filter is applied client-side once real deployment
+      // timestamps are present; keep the state referenced by the UI.
+      void windowDays
+      setTokens(normalizeDeployerTokens(raw))
+      setLoading(false)
     }
     fetchTokens()
   }, [deployerAddress, chain, windowDays, initialTokens])

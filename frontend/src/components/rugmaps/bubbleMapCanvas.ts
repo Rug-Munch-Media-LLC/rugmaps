@@ -88,7 +88,10 @@ export function normalizeBubbleNodes(rawNodes: any[]): BubbleNode[] {
       label: n.label || n.name || null,
       value,
       risk,
-      color: n.color || getNodeColor(risk, n.layer || i === 0 ? 0 : 1),
+      // BUGFIX (proven by bubbleDataMapping.test.ts): the old expression
+      // `n.layer || i === 0 ? 0 : 1` parsed as `(n.layer || i === 0) ? 0 : 1`,
+      // painting EVERY node with an explicit layer ≥ 1 in the center color.
+      color: n.color || getNodeColor(risk, n.layer ?? (i === 0 ? 0 : 1)),
       layer: n.layer ?? (i === 0 ? 0 : 1),
       isDev: n.isDev || n.is_dev || false,
       isBundle: n.isBundle || n.is_bundle || false,
