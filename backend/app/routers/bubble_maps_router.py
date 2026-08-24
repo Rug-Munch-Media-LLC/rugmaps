@@ -195,10 +195,10 @@ async def token_holder_graph(
     # ── Verdict guard: never let the AI narrate an empty graph ──────────
     if len(enriched_nodes) < MIN_NODES_FOR_VERDICT:
         logger.warning(
-            "token_graph_insufficient_data",
-            token=token_address[:12],
-            chain=chain,
-            nodes=len(enriched_nodes),
+            "token_graph_insufficient_data token=%s chain=%s nodes=%s",
+            token_address[:12],
+            chain,
+            len(enriched_nodes),
         )
         response = {
             "token_address": token_address,

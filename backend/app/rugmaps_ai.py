@@ -113,8 +113,8 @@ async def get_wallet_labels(addresses: list[str], chain: str = "ethereum") -> di
             return_exceptions=True,
         )
         for addr, info, risk in zip(addresses[:50], infos, risks, strict=False):
-            entity = info if isinstance(info, dict) else {}
-            if isinstance(risk, Exception):
+            entity: dict = info if isinstance(info, dict) and not isinstance(info, BaseException) else {}
+            if isinstance(risk, BaseException) or not isinstance(risk, tuple):
                 risk_score, risk_level = 0, "unknown"
             else:
                 risk_score, risk_level = risk
@@ -143,7 +143,7 @@ async def search_similar_scams(token_address: str, chain: str) -> list[dict]:
         embedding = await embedder.embed_query(query_text)
 
         if "scam_patterns" in ann.indexes:
-            results = ann.search("scam_patterns", embedding, k=5)
+            results = await ann.search("scam_patterns", embedding, k=5)
             for r in results:
                 similar.append(
                     {
@@ -154,7 +154,7 @@ async def search_similar_scams(token_address: str, chain: str) -> list[dict]:
                 )
 
         if "known_scams" in ann.indexes:
-            results = ann.search("known_scams", embedding, k=5)
+            results = await ann.search("known_scams", embedding, k=5)
             for r in results:
                 similar.append(
                     {
@@ -165,7 +165,7 @@ async def search_similar_scams(token_address: str, chain: str) -> list[dict]:
                 )
 
         if "wallet_profiles" in ann.indexes:
-            results = ann.search("wallet_profiles", embedding, k=5)
+            results = await ann.search("wallet_profiles", embedding, k=5)
             for r in results:
                 similar.append(
                     {
@@ -255,9 +255,9 @@ async def _call_llama_for_rugmaps(prompt: str, task_type: str = "analysis", max_
                 data = resp2.json()
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 return _strip_think_tags(content).strip()
-            logger.warning("llama_non_200", status=resp.status_code, body=resp.text[:200], model=model)
+            logger.warning("llama_non_200 status=%s body=%s model=%s", resp.status_code, resp.text[:200], model)
     except Exception as e:
-        logger.warning("llama_rugmaps_call_failed", error=str(e))
+        logger.warning("llama_rugmaps_call_failed error=%s", str(e))
     return None
 
 
@@ -563,8 +563,10 @@ def _fallback_anomaly_detection(holder_data: dict, scanner_data: dict | None) ->
             if anomalies
             else "SAFE"
         ),
-        "summary": f"Found {len(anomalies)} anomaly(s). "
-        + (anomalies[0]["description"] if anomalies else "No concerning patterns detected."),
+        "summary": (
+            f"Found {len(anomalies)} anomaly(s). "
+            f"{anomalies[0]['description'] if anomalies else 'No concerning patterns detected.'}"
+        ),
         "recommendation": (
             "DO NOT INVEST — strong rug pull indicators"
             if rug_prob >= 70
@@ -688,10 +690,10 @@ def generate_fallback_analysis(
     if node_count < MIN_NODES_FOR_VERDICT:
         return insufficient_data_analysis(node_count, f"{node_count}-node-graph", "unknown")
 
-    red_flags = []
-    green_flags = []
-    dev_wallets = []
-    bundle_wallets = []
+    red_flags: list[str] = []
+    green_flags: list[str] = []
+    dev_wallets: list[str] = []
+    bundle_wallets: list[str] = []
 
     top_holder_pct = sum(h.get("supply_pct", h.get("pct", 0)) for h in holders[:3])
     if top_holder_pct > 50:

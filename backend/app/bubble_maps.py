@@ -386,7 +386,7 @@ class BubbleMapsPro:
 
             next_frontier: list[str] = []
             for src_addr, neighbors in zip(batch, neighbor_maps, strict=False):
-                if isinstance(neighbors, Exception):
+                if isinstance(neighbors, BaseException) or not isinstance(neighbors, list):
                     continue
                 for cp in neighbors[:30]:
                     addr = cp.get("address", "") or cp.get("id", "")
@@ -613,30 +613,22 @@ class BubbleMapsPro:
                 resp = await client.post(ingest_url, json=payload, headers=headers)
                 if resp.status_code < 400:
                     logger.info(
-                        "databus_ingest_ok",
-                        address=address[:12],
-                        risk_score=risk_score,
-                        status=resp.status_code,
+                        "databus_ingest_ok address=%s risk_score=%s status=%s",
+                        address[:12],
+                        risk_score,
+                        resp.status_code,
                     )
                 else:
                     logger.debug(
-                        "databus_ingest_non_ok",
-                        address=address[:12],
-                        status=resp.status_code,
-                        body=resp.text[:200],
+                        "databus_ingest_non_ok address=%s status=%s body=%s",
+                        address[:12],
+                        resp.status_code,
+                        resp.text[:200],
                     )
         except (httpx.ConnectError, httpx.TimeoutException, httpx.RemoteProtocolError) as exc:
-            logger.debug(
-                "databus_ingest_unavailable",
-                address=address[:12],
-                error=str(exc)[:100],
-            )
+            logger.debug("databus_ingest_unavailable address=%s error=%s", address[:12], str(exc)[:100])
         except Exception as exc:
-            logger.warning(
-                "databus_ingest_failed",
-                address=address[:12],
-                error=str(exc)[:200],
-            )
+            logger.warning("databus_ingest_failed address=%s error=%s", address[:12], str(exc)[:200])
 
     @staticmethod
     def _risk_level(score: float) -> str:

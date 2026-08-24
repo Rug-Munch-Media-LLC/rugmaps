@@ -124,7 +124,7 @@ class WalletObservation:
     chain: str
     event: str
     timestamp: float
-    labels: list[dict] = field(default_factory=list)
+    labels: list[WalletLabel] = field(default_factory=list)
 
 
 @dataclass
