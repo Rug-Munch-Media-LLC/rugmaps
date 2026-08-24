@@ -2,13 +2,14 @@
 # Rug Munch Media fleet standard (from fleet-template/Makefile.python.template)
 # Source of truth: https://git.rugmunch.io/RugMunchMedia/rugmaps
 #
-# Mixed Python (backend) + plain frontend repo. Backend does geo/risk maps;
-# frontend is a static asset bundle (no package.json yet).
+# Mixed Python (backend) + Vite/React (frontend) repo.
 #
 # Layout:
-#   backend/app/rugmaps_ai.py          - map generation + AI commentary
+#   backend/app/main.py                - FastAPI entry (systemd: rugmaps-backend, :8002)
+#   backend/app/bubble_maps.py         - wallet cluster graph engine
+#   backend/app/rugmaps_ai.py          - local llama.cpp AI analysis
 #   backend/app/routers/               - FastAPI routes
-#   frontend/src/components/           - static components (no bundler)
+#   frontend/                          - Vite + React + Vitest + Biome
 
 SHELL := /bin/bash
 
@@ -24,39 +25,44 @@ install: ## Install backend deps in editable mode
 
 dev: dev-backend ## Default dev target = backend FastAPI server
 
-dev-backend: ## Start backend on :8000 (uvicorn, rugmaps_ai module)
-	cd backend && uvicorn app.rugmaps_ai:app --reload --host 0.0.0.0 --port 8000
+dev-backend: ## Start backend on :8002 (matches systemd rugmaps-backend)
+	cd backend && uvicorn app.main:app --reload --host 127.0.0.1 --port 8002
 
-dev-frontend: ## Serve frontend/ static files on :5173
-	cd frontend && python3 -m http.server 5173
+dev-frontend: ## Vite dev server on :5173
+	cd frontend && npm run dev
 
 build-backend: ## Build backend Docker image
 	cd backend && docker build -t rugmaps-backend .
 
-build-frontend: ## Bundle frontend (no bundler - placeholder)
-	@echo "frontend is a static site - ship frontend/ as-is"
-	@test -d frontend/src/components
+build-frontend: ## Production build via Vite
+	cd frontend && npm ci --frozen-lockfile && npm run build
 
 build: build-backend ## Build backend image + verify frontend layout
 
-lint: lint-backend ## Lint backend (frontend has no JS linter configured)
+lint: lint-backend lint-frontend ## Lint backend (ruff) + frontend (biome)
 
 lint-backend: ## Lint backend/app/ with ruff
 	cd backend && ruff check app/
 
-lint-frontend: ## Placeholder (no package.json in frontend/ yet)
-	@echo "no frontend linter configured yet"
+lint-frontend: ## Biome lint on frontend/src
+	cd frontend && npx @biomejs/biome lint src/
 
-format: format-backend ## Format backend with ruff (writes)
+test-backend: ## Backend pytest with coverage
+	cd backend && python -m pytest tests/ --cov=app --cov-fail-under=50
+
+test-frontend: ## Frontend vitest suite
+	cd frontend && npx vitest run
+
+format: format-backend format-frontend ## Format backend + frontend
 
 format-backend: ## Format backend/app/ with ruff
 	cd backend && ruff format app/
 	cd backend && ruff check --fix app/
 
-format-frontend: ## Placeholder
-	@echo "no frontend formatter configured yet"
+format-frontend: ## Biome format frontend (writes)
+	cd frontend && npx @biomejs/biome format --write src/
 
-check: lint-backend ## Full check: lint + format
+check: lint typecheck test-backend test-frontend ## Full check: lint + types + both suites
 
 typecheck: ## MyPy on backend
 	cd backend && mypy app/ --ignore-missing-imports
@@ -74,7 +80,7 @@ precommit: ## Install pre-commit hooks
 commit: ## Interactive commit with commitizen
 	cz commit || git commit
 
-ci: lint typecheck security ## Full CI: lint + typecheck + security
+ci: lint typecheck security test-backend test-frontend ## Full CI parity with Forgejo
 
 clean: ## Remove build artifacts
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true

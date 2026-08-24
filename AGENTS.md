@@ -5,35 +5,46 @@
 > AI agent contract. Read this before touching anything in this repo.
 
 ## Status
-canonical · owner=crmuncher · last_updated=2026-07-06
+canonical · owner=crmuncher · last_updated=2026-08-24
 
 ## What This Repo Is
-rugmaps — orphaned component. See TRIAGE.md for disposition.
+rugmaps — wallet cluster visualization and AI-powered token investigation.
+Deployed: `rugmaps-backend.service` on Talos (:8002); product surface served
+via rmi-frontend's premium `/rugmaps` route. See TRIAGE.md for the current
+(active development) disposition.
 
 ## Type
-`orphan` · decision=MERGE → `rmi-backend` then ARCHIVE
+`product` · backend (FastAPI) + frontend (Vite/React) · deployed service
 
 ## Where It Lives
-- Source: `https://github.com/RugMunchMedia/rugmaps`
-- Status: no live deployment (orphaned, merging into rmi-backend)
+- Source: `https://git.rugmunch.io/RugMunchMedia/rugmaps`
+- Deployment: systemd `rugmaps-backend.service`, 127.0.0.1:8002
+- DataBus auth: `RMI_INTERNAL_KEY` via `/srv/secrets/rugmaps.env`
+  (systemd drop-in) — required for DataBus ingest writeback.
 
 ## Built With
-- Standards: See the project documentation for development standards
-- Toolchain: See README.md for development toolchain
-- Conventions: See CONTRIBUTING.md for coding conventions
+- Backend: FastAPI, httpx, pytest (55% coverage floor in CI), ruff, mypy, bandit
+- Frontend: Vite, React, Vitest + covgate (60% per-diff gate), Biome
+- AI: local llama.cpp (no paid APIs)
 
 ## 🚨 CRITICAL RULES
 
-1. **No new features.** This repo is on a merge-and-archive track. Add nothing that isn't a fix or a docs improvement.
+1. **Verdict guard is sacred.** Never return SAFE/verdicts on insufficient
+   graph data (< MIN_NODES_FOR_VERDICT nodes). Empty data ≠ safe token.
 2. **No nested repos.** Don't commit other complete project trees inside this one.
 3. **No secrets.** Never commit `.secrets/`, `.env`, `*.pem`, `*.key`, `*.crt`.
+   Service keys come from gopass → /srv/secrets → systemd env only.
 4. **No data blobs.** Don't commit `*.zip`, `*.parquet`, model weights, sqlite files.
-5. **Coordinate merges with rmi-backend.** When the merge happens, this repo will be archived on Forgejo.
-6. **Read TRIAGE.md before doing anything non-trivial.** The decision is final unless escalated.
+5. **Competitor naming.** Do not introduce new "bubblemaps"/"BubbleMaps.com"
+   references — brand everything RugMaps (rebrand scrub in progress).
+6. **Run the suites before pushing.** `make ci` parity: ruff, mypy, bandit,
+   pytest (cov ≥50%), vitest.
 
 ## Commands
-
-There is no live build/test/dev cycle for this repo. It exists only to preserve the code history for reference during the merge into `rmi-backend`.
+- `make dev-backend`   # uvicorn on :8002 (matches systemd)
+- `make test-backend`  # pytest + coverage floor 50%
+- `make test-frontend` # vitest
+- `make ci`            # full parity with Forgejo CI
 
 ## Status
 
@@ -49,8 +60,8 @@ See [TRIAGE.md](TRIAGE.md) for the disposition decision.
 
 ## Open-Core Protection
 
-This repo is open source (MIT) and on a merge-and-archive track. The code
-here demonstrates entity mapping patterns for crypto forensics — it is NOT
+This repo is open source (MIT) and under active development as a product.
+The code demonstrates entity mapping patterns for crypto forensics — it is NOT
 the complete RugMunch production wallet intelligence infrastructure. The
 managed platform at rugmunch.io includes proprietary enhancements.
 
