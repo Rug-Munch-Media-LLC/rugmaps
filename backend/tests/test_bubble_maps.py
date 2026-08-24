@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
 # ── BubbleMapsPro Unit Tests ──────────────────────────────────────────────
@@ -285,62 +286,93 @@ class TestAutoLabeler:
         assert "by_type" in stats
 
 
-# ── ANN Index Stub Tests ──────────────────────────────────────────────────
+# ── Similarity Search (single-system rugbrain client) Tests ──────────────
 
 
-class TestANNIndex:
-    """Tests for the ANN index stub."""
-
-    @pytest.mark.asyncio
-    async def test_get_ann_index_returns_singleton(self):
-        """get_ann_index() should return a working singleton."""
-        from app.ann_index import ANNIndex, get_ann_index
-
-        idx = get_ann_index()
-        assert isinstance(idx, ANNIndex)
-        assert "scam_patterns" in idx.indexes
-        assert "known_scams" in idx.indexes
+class TestSimilaritySearch:
+    """Tests for the rugbrain-backed similarity search client."""
 
     @pytest.mark.asyncio
-    async def test_search_returns_empty_when_unavailable(self):
-        """search() should return empty list when backend is down."""
-        from app.ann_index import get_ann_index
+    async def test_search_multi_normalizes_results(self):
+        """search_multi() should normalize rugbrain results to metadata+score."""
+        from unittest.mock import patch
 
-        idx = get_ann_index()
-        # When no backend, it should return empty gracefully (no exception)
-        results = await idx.search("scam_patterns", [0.0] * 768, k=5)
-        assert isinstance(results, list)
-        # May be empty since there's no backend running
-        assert len(results) >= 0
+        from app.ann_index import SimilaritySearch
 
+        sim = SimilaritySearch()
+        fake_resp = type(
+            "R",
+            (),
+            {
+                "status_code": 200,
+                "json": staticmethod(
+                    lambda: {
+                        "results": [
+                            {"metadata": {"description": "honeypot pattern", "pattern": "sell_tax"}, "score": 0.91},
+                            {"payload": {"description": "bundle scam"}, "score": 0.72},
+                        ]
+                    }
+                ),
+            },
+        )()
 
-# ── Crypto Embeddings Stub Tests ──────────────────────────────────────────
+        async def fake_post(*a, **kw):
+            return fake_resp
 
-
-class TestCryptoEmbeddings:
-    """Tests for the CryptoEmbedder stub."""
+        with patch.object(httpx.AsyncClient, "post", new=fake_post):
+            results = await sim.search_multi(["scam_patterns", "known_scams"], "rug pull", k=5)
+        assert len(results) == 2
+        assert results[0]["metadata"]["pattern"] == "sell_tax"
+        assert results[0]["score"] == 0.91
+        assert results[1]["metadata"]["description"] == "bundle scam"
 
     @pytest.mark.asyncio
-    async def test_embed_query_returns_vector(self):
-        """embed_query() should return a vector of correct dimension."""
-        from app.crypto_embeddings import CryptoEmbedder
+    async def test_search_returns_empty_on_unavailable(self):
+        """Backend down → empty list, never an exception (graceful)."""
+        from app.ann_index import SimilaritySearch
 
-        embedder = CryptoEmbedder()
-        vec = await embedder.embed_query("test token solana rug pull")
-        assert isinstance(vec, list)
-        assert len(vec) == 768
-        # Should be float values
-        assert all(isinstance(v, float) for v in vec)
+        sim = SimilaritySearch()
+        # Point at a dead port so connection fails fast
+        import app.ann_index as ann_mod
+
+        ann_mod.RAG_API_URL = "http://127.0.0.1:1/api/v1"
+        try:
+            results = await sim.search("scam_patterns", "rug pull honeypot", k=5)
+            assert isinstance(results, list)
+            assert len(results) == 0
+        finally:
+            ann_mod.RAG_API_URL = "http://127.0.0.1:8012/api/v1"
 
     @pytest.mark.asyncio
-    async def test_embed_query_deterministic(self):
-        """Same input should produce same embedding (fallback)."""
-        from app.crypto_embeddings import CryptoEmbedder
+    async def test_collection_map_covers_logical_indexes(self):
+        """Logical index names must map to real Qdrant collections."""
+        from app.ann_index import COLLECTION_MAP
 
-        embedder = CryptoEmbedder()
-        vec1 = await embedder.embed_query("hello world")
-        vec2 = await embedder.embed_query("hello world")
-        assert vec1 == vec2
+        assert COLLECTION_MAP["scam_patterns"] == ["scam_patterns"]
+        assert COLLECTION_MAP["known_scams"] == ["known_scams"]
+        assert COLLECTION_MAP["wallet_profiles"] == ["wallet_embeddings"]
+
+    @pytest.mark.asyncio
+    async def test_search_similar_scams_dedupes(self):
+        """search_similar_scams() dedupes by description and caps at 10."""
+        from unittest.mock import patch
+
+        import app.rugmaps_ai as ai
+
+        async def fake_search(indexes, query, k=10):
+            return [
+                {"metadata": {"description": "same desc"}, "score": 0.9},
+                {"metadata": {"description": "same desc"}, "score": 0.8},
+                {"metadata": {"description": "unique one"}, "score": 0.7},
+            ]
+
+        with patch("app.ann_index.get_similarity_search") as g:
+            inst = type("S", (), {"search_multi": staticmethod(fake_search)})()
+            g.return_value = inst
+            out = await ai.search_similar_scams("0xtok", "ethereum")
+        descs = [x["description"] for x in out]
+        assert len(descs) == len(set(descs))
+        assert "unique one" in descs
 
 
 # ── Graph Traversal & Verdict Guard (2026-08-24 audit fixes) ─────────────

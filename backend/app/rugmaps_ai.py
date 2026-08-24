@@ -130,55 +130,36 @@ async def get_wallet_labels(addresses: list[str], chain: str = "ethereum") -> di
 
 
 async def search_similar_scams(token_address: str, chain: str) -> list[dict]:
-    """Search FAISS indexes for similar scam patterns."""
-    similar = []
+    """Find similar scam patterns via the fleet vector stack (rugbrain → Qdrant).
+
+    Single indexing system: embedding + storage + search live in rugbrain.
+    No local FAISS, no local embeddings (crypto_embeddings.py removed
+    2026-08-24 per the single-indexing-system rule).
+    """
+    similar: list[dict] = []
     try:
-        from app.ann_index import get_ann_index
-        from app.crypto_embeddings import CryptoEmbedder
+        from app.ann_index import get_similarity_search
 
-        ann = get_ann_index()
-        embedder = CryptoEmbedder()
-
+        sim = get_similarity_search()
         query_text = f"token {token_address} on {chain} rug pull scam honeypot"
-        embedding = await embedder.embed_query(query_text)
+        results = await sim.search_multi(["scam_patterns", "known_scams"], query_text, k=10)
 
-        if "scam_patterns" in ann.indexes:
-            results = await ann.search("scam_patterns", embedding, k=5)
-            for r in results:
-                similar.append(
-                    {
-                        "pattern": r.get("metadata", {}).get("pattern", ""),
-                        "description": r.get("metadata", {}).get("description", ""),
-                        "similarity": float(r.get("score", 0)),
-                    }
-                )
-
-        if "known_scams" in ann.indexes:
-            results = await ann.search("known_scams", embedding, k=5)
-            for r in results:
-                similar.append(
-                    {
-                        "scam_type": r.get("metadata", {}).get("type", ""),
-                        "description": r.get("metadata", {}).get("description", ""),
-                        "similarity": float(r.get("score", 0)),
-                    }
-                )
-
-        if "wallet_profiles" in ann.indexes:
-            results = await ann.search("wallet_profiles", embedding, k=5)
-            for r in results:
-                similar.append(
-                    {
-                        "wallet_type": r.get("metadata", {}).get("type", ""),
-                        "description": r.get("metadata", {}).get("label", ""),
-                        "similarity": float(r.get("score", 0)),
-                    }
-                )
+        for r in results:
+            md = r.get("metadata", {}) or {}
+            entry: dict = {
+                "description": str(md.get("description") or md.get("title") or "")[:200],
+                "similarity": float(r.get("score") or 0.0),
+            }
+            if md.get("pattern"):
+                entry["pattern"] = str(md["pattern"])
+            if md.get("type") or md.get("scam_type"):
+                entry["scam_type"] = str(md.get("type") or md.get("scam_type"))
+            similar.append(entry)
     except Exception as e:
-        logger.warning(f"FAISS search failed: {e}")
+        logger.warning("similarity_search_failed error=%s", str(e)[:150])
 
-    seen = set()
-    unique = []
+    seen: set[str] = set()
+    unique: list[dict] = []
     for s in sorted(similar, key=lambda x: x.get("similarity", 0), reverse=True):
         desc = s.get("description", "")
         if desc and desc not in seen:
