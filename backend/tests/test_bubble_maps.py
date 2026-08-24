@@ -35,32 +35,36 @@ class TestBubbleMapsPro:
 
         bm = get_bubble_maps_pro()
 
-        # Mock the DataBus calls
-        bm._databus_fetch = AsyncMock(
-            side_effect=[
-                # Center wallet labels
-                {"data": {"labels": [{"name": "Test Wallet", "type": "wallet", "risk_score": 10}]}},
-                # Entity intel (counterparties)
-                {
-                    "data": {
-                        "counterparties": [
-                            {"address": "0xdead...", "weight": 50.0, "transactions": 100, "risk_score": 5},
-                            {
-                                "address": "0xbeef...",
-                                "weight": 25.0,
-                                "transactions": 50,
-                                "risk_score": 80,
-                                "is_bundle": True,
-                            },
-                        ]
+        # Kwargs-keyed mock: robust to concurrent/parallel fetch ordering.
+        def fake_databus(data_type: str, **kwargs):
+            if data_type == "wallet_labels":
+                addr = kwargs.get("address", "")
+                names = {
+                    "0xabc...": {"name": "Test Wallet", "type": "wallet", "risk_score": 10},
+                    "0xdead...": {"name": "Uniswap Router", "type": "contract", "risk_score": 5},
+                    "0xbeef...": {"name": "Suspected Bot", "type": "mev_bot", "risk_score": 80},
+                }
+                return {"data": {"labels": [names.get(addr, {})]}}
+            if data_type == "entity_intel":
+                if kwargs.get("address") == "0xabc...":
+                    return {
+                        "data": {
+                            "counterparties": [
+                                {"address": "0xdead...", "weight": 50.0, "transactions": 100, "risk_score": 5},
+                                {
+                                    "address": "0xbeef...",
+                                    "weight": 25.0,
+                                    "transactions": 50,
+                                    "risk_score": 80,
+                                    "is_bundle": True,
+                                },
+                            ]
+                        }
                     }
-                },
-                # Labels for counterparty 1
-                {"data": {"labels": [{"name": "Uniswap Router", "type": "contract", "risk_score": 5}]}},
-                # Labels for counterparty 2
-                {"data": {"labels": [{"name": "Suspected Bot", "type": "mev_bot", "risk_score": 80}]}},
-            ]
-        )
+                return {"data": {"counterparties": []}}
+            return None
+
+        bm._databus_fetch = AsyncMock(side_effect=fake_databus)
 
         result = await bm.generate_map(
             center_wallet="0xabc...",
@@ -337,3 +341,135 @@ class TestCryptoEmbeddings:
         vec1 = await embedder.embed_query("hello world")
         vec2 = await embedder.embed_query("hello world")
         assert vec1 == vec2
+
+
+# ── Graph Traversal & Verdict Guard (2026-08-24 audit fixes) ─────────────
+
+
+class TestGraphTraversal:
+    """BFS traversal with intra-cluster edge discovery."""
+
+    @pytest.mark.asyncio
+    async def test_intra_cluster_edges_discovered(self):
+        """L1↔L1 edges (bundle signal) must appear in links, not just spokes."""
+        from app.bubble_maps import get_bubble_maps_pro
+
+        bm = get_bubble_maps_pro()
+
+        def fake_databus(data_type: str, **kwargs):
+            addr = kwargs.get("address", "")
+            if data_type == "wallet_labels":
+                return {"data": {"labels": [{"name": f"W {addr[:8]}", "risk_score": 10}]}}
+            if data_type == "entity_intel":
+                if addr == "0xcenter":
+                    return {
+                        "data": {
+                            "counterparties": [
+                                {"address": "0xa1", "weight": 10.0, "transactions": 20},
+                                {"address": "0xa2", "weight": 10.0, "transactions": 20},
+                            ]
+                        }
+                    }
+                if addr in ("0xa1", "0xa2"):
+                    # a1 and a2 transact with EACH OTHER — the bundle signature.
+                    other = "0xa2" if addr == "0xa1" else "0xa1"
+                    return {
+                        "data": {
+                            "counterparties": [
+                                {"address": other, "weight": 5.0, "transactions": 9},
+                            ]
+                        }
+                    }
+            return None
+
+        bm._databus_fetch = AsyncMock(side_effect=fake_databus)
+        result = await bm.generate_map(center_wallet="0xcenter", chain="ethereum", depth=2)
+
+        pairs = {frozenset((ln.source, ln.target)) for ln in result.links}
+        assert frozenset(("0xa1", "0xa2")) in pairs, (
+            "Intra-cluster edge between two L1 wallets missing — cluster detection broken"
+        )
+        # No duplicate/reverse duplicates
+        assert len(pairs) == len(result.links)
+
+    @pytest.mark.asyncio
+    async def test_depth3_expands_three_layers(self):
+        """depth=3 must actually reach layer-3 nodes (honest depth)."""
+        from app.bubble_maps import get_bubble_maps_pro
+
+        bm = get_bubble_maps_pro()
+
+        def fake_databus(data_type: str, **kwargs):
+            addr = kwargs.get("address", "")
+            if data_type == "wallet_labels":
+                return {"data": {"labels": [{"name": f"W {addr[:8]}", "risk_score": 5}]}}
+            if data_type == "entity_intel":
+                tree = {
+                    "0xc": ["0xl1a"],
+                    "0xl1a": ["0xl2a"],
+                    "0xl2a": ["0xl3a"],
+                }
+                children = tree.get(addr, [])
+                return {"data": {"counterparties": [{"address": c, "weight": 1.0} for c in children]}}
+            return None
+
+        bm._databus_fetch = AsyncMock(side_effect=fake_databus)
+        result = await bm.generate_map(center_wallet="0xc", chain="ethereum", depth=3)
+
+        layers = {n.id: n.layer for n in result.nodes}
+        assert layers.get("0xl1a") == 1
+        assert layers.get("0xl2a") == 2
+        assert layers.get("0xl3a") == 3, "depth=3 did not traverse to layer 3"
+
+    @pytest.mark.asyncio
+    async def test_depth_clamped_to_max(self):
+        """Depths beyond MAX_DEPTH are clamped, not silently mis-traversed."""
+        from app.bubble_maps import MAX_DEPTH, get_bubble_maps_pro
+
+        bm = get_bubble_maps_pro()
+        bm._databus_fetch = AsyncMock(return_value=None)
+        result = await bm.generate_map(center_wallet="0xc", chain="ethereum", depth=99)
+        assert result.metadata["depth"] == MAX_DEPTH
+
+    @pytest.mark.asyncio
+    async def test_cache_eviction(self):
+        """Cache must evict oldest entries beyond CACHE_MAX_ENTRIES."""
+        from app.bubble_maps import CACHE_MAX_ENTRIES, get_bubble_maps_pro
+
+        bm = get_bubble_maps_pro()
+        bm._cache.clear()
+        for i in range(CACHE_MAX_ENTRIES + 50):
+            bm._cache[f"k{i}"] = (float(i), {"i": i})
+        bm._cache_evict()
+        assert len(bm._cache) <= CACHE_MAX_ENTRIES
+        # Oldest keys evicted, newest retained
+        assert "k0" not in bm._cache
+        assert f"k{CACHE_MAX_ENTRIES + 49}" in bm._cache
+
+
+class TestVerdictGuard:
+    """Empty/insufficient graphs must NEVER produce a SAFE verdict."""
+
+    def test_fallback_analysis_insufficient_nodes(self):
+        from app.rugmaps_ai import generate_fallback_analysis
+
+        result = generate_fallback_analysis(
+            risk_score=0, holders=[], labels={}, similar_scams=[], node_count=1, link_count=0
+        )
+        assert result["verdict"] == "UNKNOWN"
+        assert result["status"] == "insufficient_data"
+        assert result["confidence"] == 0
+
+    def test_insufficient_data_shape(self):
+        from app.rugmaps_ai import insufficient_data_analysis
+
+        d = insufficient_data_analysis(1, "0xtoken123456", "ethereum")
+        assert d["verdict"] == "UNKNOWN"
+        assert d["risk_score"] is None
+        assert "NOT a safety signal" in d["summary"]
+        assert d["green_flags"] == []
+
+    def test_min_nodes_threshold_exists(self):
+        from app.rugmaps_ai import MIN_NODES_FOR_VERDICT
+
+        assert MIN_NODES_FOR_VERDICT >= 3

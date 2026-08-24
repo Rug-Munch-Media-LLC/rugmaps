@@ -1,9 +1,10 @@
 """
 RugMaps API Router — RMI's interactive wallet visualization.
-Self-contained engine, no BubbleMaps.com API dependency.
+Self-contained engine — RugMaps' own wallet-cluster intelligence, zero third-party map APIs.
 Connects to /api/v1/rugmaps/*
 """
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException, Query
@@ -12,6 +13,10 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/rugmaps", tags=["rugmaps"])
+
+# Retained background task set — prevents fire-and-forget tasks from being
+# garbage-collected mid-flight (CPython keeps only weak refs to running tasks).
+_background_tasks: set[asyncio.Task] = set()
 
 SUPPORTED_CHAINS = {"solana", "ethereum", "base", "bsc", "arbitrum", "optimism", "polygon"}
 
@@ -110,14 +115,15 @@ async def token_holder_graph(
 ):
     """Generate a token holder graph with AI analysis and RAG caching.
     Uses DeepSeek Flash + our FAISS indexes + wallet labels + semantic cache."""
-    import asyncio
 
     from app.rugmaps_ai import (
+        MIN_NODES_FOR_VERDICT,
         generate_ai_analysis,
         generate_fallback_analysis,
         get_cached_analysis,
         get_token_holders,
         get_wallet_labels,
+        insufficient_data_analysis,
         search_similar_scams,
         set_cached_analysis,
     )
@@ -178,7 +184,6 @@ async def token_holder_graph(
         node["tags"] = entity.get("tags") or []
         node["risk_level"] = label_data.get("risk_level", "unknown")
 
-    # Generate AI analysis (DeepSeek Flash + fallback to our data engine)
     graph_data = {
         "node_count": len(enriched_nodes),
         "link_count": min(len(links), limit * 2),
@@ -186,6 +191,31 @@ async def token_holder_graph(
         "risk_level": d.get("risk_level", "unknown"),
         "stats": d.get("stats", {}),
     }
+
+    # ── Verdict guard: never let the AI narrate an empty graph ──────────
+    if len(enriched_nodes) < MIN_NODES_FOR_VERDICT:
+        logger.warning(
+            "token_graph_insufficient_data",
+            token=token_address[:12],
+            chain=chain,
+            nodes=len(enriched_nodes),
+        )
+        response = {
+            "token_address": token_address,
+            "chain": chain,
+            "nodes": enriched_nodes,
+            "links": links[: limit * 2],
+            **graph_data,
+            "analysis": insufficient_data_analysis(len(enriched_nodes), token_address, chain),
+            "similar_scams": [],
+            "wallet_labels_count": 0,
+            "from_cache": False,
+            "data_quality": "insufficient",
+        }
+        set_cached_analysis(token_address, chain, response)
+        return response
+
+    # Generate AI analysis (DeepSeek Flash + fallback to our data engine)
 
     try:
         ai_analysis = await generate_ai_analysis(token_address, chain, graph_data, holders, labels, similar_scams)
@@ -210,24 +240,31 @@ async def token_holder_graph(
         "similar_scams": similar_scams[:5],
         "wallet_labels_count": len(labels),
         "from_cache": False,
+        "data_quality": "ok",
     }
 
     # Cache for future requests
     set_cached_analysis(token_address, chain, response)
 
-    # Auto-label all wallets in the graph (background, non-blocking)
-    try:
-        from app.auto_labeler import get_auto_labeler
+    # Auto-label all wallets in the graph (background — must NOT block the
+    # response; task reference retained so it survives GC)
+    async def _auto_label_graph() -> None:
+        try:
+            from app.auto_labeler import get_auto_labeler
 
-        labeler = get_auto_labeler()
-        for node in enriched_nodes:
-            await labeler.observe_wallet(
-                node["address"],
-                chain,
-                {"event": "scanned_in_graph", "token": token_address, "risk": node.get("risk", 0)},
-            )
-    except Exception as e:
-        logger.debug("Auto-labeling failed (best-effort): %s", e)
+            labeler = get_auto_labeler()
+            for node in enriched_nodes:
+                await labeler.observe_wallet(
+                    node["address"],
+                    chain,
+                    {"event": "scanned_in_graph", "token": token_address, "risk": node.get("risk", 0)},
+                )
+        except Exception as e:  # best-effort by design
+            logger.debug("Auto-labeling failed (best-effort): %s", e)
+
+    task = asyncio.create_task(_auto_label_graph())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
     return response
 

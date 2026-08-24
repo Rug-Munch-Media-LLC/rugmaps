@@ -1,5 +1,5 @@
 """
-RugMaps Bubble Maps Engine — wallet cluster graph generation.
+RugMaps Wallet Cluster Engine — bubble-map graph generation.
 
 Connects to the rmi-backend DataBus for wallet labels, entity intelligence,
 and transaction graph data. Falls back gracefully when the backend is
@@ -29,6 +29,10 @@ logger = logging.getLogger(__name__)
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
 BACKEND_TIMEOUT = float(os.environ.get("BACKEND_TIMEOUT", "10"))
 CACHE_TTL = int(os.environ.get("RUGMAPS_CACHE_TTL", "300"))  # 5 min default
+CACHE_MAX_ENTRIES = int(os.environ.get("RUGMAPS_CACHE_MAX_ENTRIES", "2000"))
+MAX_DEPTH = 3  # honest traversal cap — layers beyond this add noise, not signal
+MAX_L1_COUNTERPARTIES = 100
+MAX_FRONTIER_PER_LAYER = 60
 
 # Supported chains and their explorer URL templates
 EXPLORERS: dict[str, str] = {
@@ -203,6 +207,7 @@ class BubbleMapsPro:
         self._cache: dict[str, tuple[float, Any]] = {}
         self._http: httpx.AsyncClient | None = None
         self._http_lock = asyncio.Lock()
+        self._bg_tasks: set[asyncio.Task] = set()  # retain fire-and-forget tasks (GC protection)
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._http is None:
@@ -213,6 +218,15 @@ class BubbleMapsPro:
                         limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
                     )
         return self._http
+
+    def _cache_evict(self) -> None:
+        """Evict oldest entries when the cache exceeds CACHE_MAX_ENTRIES."""
+        if len(self._cache) <= CACHE_MAX_ENTRIES:
+            return
+        overflow = len(self._cache) - CACHE_MAX_ENTRIES
+        oldest = sorted(self._cache.items(), key=lambda kv: kv[1][0])[:overflow]
+        for key, _ in oldest:
+            self._cache.pop(key, None)
 
     async def _databus_fetch(self, data_type: str, **kwargs) -> dict | None:
         """Call the rmi-backend DataBus HTTP API."""
@@ -235,6 +249,7 @@ class BubbleMapsPro:
             if resp.status_code == 200:
                 data = resp.json()
                 self._cache[cache_key] = (now, data)
+                self._cache_evict()
                 return data
             elif resp.status_code == 502:
                 logger.debug(f"DataBus unavailable for {data_type}: {resp.text[:100]}")
@@ -257,16 +272,21 @@ class BubbleMapsPro:
     ) -> BubbleMapResult:
         """Generate a wallet cluster graph centered on *center_wallet*.
 
+        Traversal is a true breadth-first expansion: every discovered node's
+        counterparties are fetched, and edges BETWEEN discovered wallets
+        (bundle↔bundle, dev↔bundle, L1↔L1) are captured — not just spokes
+        from the center. This is what makes cluster detection possible.
+
         Args:
             center_wallet: The wallet address to center the graph on.
             chain: Blockchain identifier (solana, ethereum, base, etc.).
-            depth: How many hops out to traverse (1-5).
-            min_strength: Minimum edge strength to include.
+            depth: How many hops out to traverse (1 to MAX_DEPTH).
+            min_strength: Minimum normalized edge strength (0-1) to include.
 
         Returns:
             BubbleMapResult with nodes, links, risk assessment.
         """
-        depth = max(1, min(depth, 5))
+        depth = max(1, min(depth, MAX_DEPTH))
 
         # Fetch wallet labels for the center address
         center_label = await self._get_entity_info(center_wallet, chain)
@@ -277,8 +297,6 @@ class BubbleMapsPro:
             address=center_wallet,
             chain=chain,
         )
-
-        # Fetch wallet labels for known counterparties
         counterparties: list[dict] = []
         if cluster_data and isinstance(cluster_data, dict):
             raw = cluster_data.get("data", cluster_data)
@@ -302,58 +320,48 @@ class BubbleMapsPro:
 
         nodes: dict[str, BubbleNode] = {center_wallet: center_node}
         links: list[BubbleLink] = []
-
-        # Process counterparties (layer 1)
         seen_addresses = {center_wallet}
-        dev_count = 0
-        bundle_count = 0
-        cex_count = 0
-        high_risk_count = 0
+        link_keys: set[frozenset] = set()  # undirected dedup for intra-cluster edges
 
-        for cp in counterparties[:100]:
+        # ── Layer 1: fetch ALL entity info concurrently (no serial N+1) ──
+        l1_candidates = []
+        for cp in counterparties[:MAX_L1_COUNTERPARTIES]:
             addr = cp.get("address", "") or cp.get("id", "")
-            if not addr or addr in seen_addresses:
-                continue
+            if addr and addr not in seen_addresses:
+                l1_candidates.append((addr, cp))
+                seen_addresses.add(addr)
 
-            cp_label_data = await self._get_entity_info(addr, chain)
+        l1_infos = await asyncio.gather(
+            *(self._get_entity_info(addr, chain) for addr, _ in l1_candidates),
+            return_exceptions=True,
+        )
+
+        frontier: list[str] = []
+        for (addr, cp), info in zip(l1_candidates, l1_infos, strict=False):
+            cp_label_data = info if isinstance(info, dict) else {}
             cp_type = cp_label_data.get("type", "")
             cp_risk = cp_label_data.get("risk_score", cp.get("risk_score", 0))
             weight = cp.get("weight", cp.get("value", cp.get("pct", 1)))
             tx_count = cp.get("transactions", cp.get("tx_count", 0))
             usd_value = cp.get("total_value_usd", cp.get("value_usd", 0))
 
-            is_dev = cp_type == "developer" or bool(cp.get("is_dev"))
-            is_bundle = cp_type == "bundle" or bool(cp.get("is_bundle"))
-            is_cex = cp_type == "exchange" or self._is_cex_label(
-                cp_label_data.get("name", "") or cp_label_data.get("label", "")
-            )
-
-            if is_dev:
-                dev_count += 1
-            if is_bundle:
-                bundle_count += 1
-            if is_cex:
-                cex_count += 1
-            if cp_risk >= 70:
-                high_risk_count += 1
-
-            node = BubbleNode(
+            nodes[addr] = BubbleNode(
                 id=addr,
                 address=addr,
                 label=cp_label_data.get("name", "") or cp_label_data.get("label", cp.get("label", "")),
                 value=float(weight) if isinstance(weight, (int, float)) else 1.0,
                 risk=float(cp_risk) if isinstance(cp_risk, (int, float)) else 0.0,
                 layer=1,
-                is_dev=is_dev,
-                is_bundle=is_bundle,
-                is_cex=is_cex,
+                is_dev=cp_type == "developer" or bool(cp.get("is_dev")),
+                is_bundle=cp_type == "bundle" or bool(cp.get("is_bundle")),
+                is_cex=cp_type == "exchange"
+                or self._is_cex_label(cp_label_data.get("name", "") or cp_label_data.get("label", "")),
                 entity_type=cp_type,
                 tags=cp_label_data.get("tags", []),
                 cluster_id=cp_label_data.get("cluster_id", ""),
                 explorer_url=EXPLORERS.get(chain, EXPLORERS["ethereum"]) + addr,
             )
-            nodes[addr] = node
-            seen_addresses.add(addr)
+            frontier.append(addr)
 
             links.append(
                 BubbleLink(
@@ -364,39 +372,109 @@ class BubbleMapsPro:
                     total_value_usd=float(usd_value) if usd_value else 0.0,
                 )
             )
+            link_keys.add(frozenset((center_wallet, addr)))
 
-            # Layer 2: counterparty of counterparty (if depth > 1)
-            if depth >= 2:
-                await self._expand_layer2(
-                    addr,
-                    chain,
-                    nodes,
-                    links,
-                    seen_addresses,
-                    cp_label_data,
-                    dev_count_accounting=is_dev,
-                    bundle_count_accounting=is_bundle,
-                    cex_count_accounting=is_cex,
-                    high_risk_count_accounting=cp_risk >= 70,
-                )
+        # ── Layers 2..depth: BFS frontier with INTRA-CLUSTER edge capture ──
+        for layer in range(2, depth + 1):
+            if not frontier:
+                break
+            batch = frontier[:MAX_FRONTIER_PER_LAYER]
+            neighbor_maps = await asyncio.gather(
+                *(self._fetch_counterparties(addr, chain) for addr in batch),
+                return_exceptions=True,
+            )
+
+            next_frontier: list[str] = []
+            for src_addr, neighbors in zip(batch, neighbor_maps, strict=False):
+                if isinstance(neighbors, Exception):
+                    continue
+                for cp in neighbors[:30]:
+                    addr = cp.get("address", "") or cp.get("id", "")
+                    if not addr or addr == src_addr:
+                        continue
+                    pair = frozenset((src_addr, addr))
+                    if addr in nodes:
+                        # Already-discovered wallet connected to ANOTHER graph
+                        # member → intra-cluster edge (the bundle/dev-ring signal).
+                        if pair not in link_keys:
+                            tx_count = cp.get("transactions", cp.get("tx_count", 0))
+                            links.append(
+                                BubbleLink(
+                                    source=src_addr,
+                                    target=addr,
+                                    value=float(tx_count) if tx_count else 0.5,
+                                    transactions=int(tx_count) if tx_count else 0,
+                                )
+                            )
+                            link_keys.add(pair)
+                        continue
+
+                    cp_label_data = await self._get_entity_info(addr, chain)
+                    cp_risk = cp_label_data.get("risk_score", cp.get("risk_score", 0))
+                    weight = cp.get("weight", cp.get("value", cp.get("pct", 1)))
+                    tx_count = cp.get("transactions", cp.get("tx_count", 0))
+
+                    nodes[addr] = BubbleNode(
+                        id=addr,
+                        address=addr,
+                        label=cp_label_data.get("name", "") or cp_label_data.get("label", cp.get("label", "")),
+                        value=float(weight) if isinstance(weight, (int, float)) else 0.5,
+                        risk=float(cp_risk) if isinstance(cp_risk, (int, float)) else 0.0,
+                        layer=layer,
+                        is_dev=cp_label_data.get("type") == "developer" or bool(cp.get("is_dev")),
+                        is_bundle=cp_label_data.get("type") == "bundle" or bool(cp.get("is_bundle")),
+                        is_cex=cp_label_data.get("type") == "exchange"
+                        or self._is_cex_label(cp_label_data.get("name", "") or cp_label_data.get("label", "")),
+                        entity_type=cp_label_data.get("type", ""),
+                        tags=cp_label_data.get("tags", []),
+                        explorer_url=EXPLORERS.get(chain, EXPLORERS["ethereum"]) + addr,
+                    )
+                    seen_addresses.add(addr)
+                    next_frontier.append(addr)
+
+                    links.append(
+                        BubbleLink(
+                            source=src_addr,
+                            target=addr,
+                            value=float(tx_count) if tx_count else 0.5,
+                            transactions=int(tx_count) if tx_count else 0,
+                        )
+                    )
+                    link_keys.add(pair)
+            frontier = next_frontier
+
+        # Apply min_strength filter (normalized against strongest edge)
+        if min_strength > 0 and links:
+            max_val = max(ln.value for ln in links) or 1.0
+            links = [ln for ln in links if (ln.value / max_val) >= min_strength]
 
         # Calculate aggregate risk score
         risk_score, risk_level = self._calculate_risk_from_nodes(nodes, links)
 
-        # Build stats
+        # Build stats — accounting spans ALL layers, not just direct neighbors
         by_layer: dict[int, int] = {}
         by_entity: dict[str, int] = {}
+        dev_count = bundle_count = cex_count = high_risk_count = 0
         for n in nodes.values():
             by_layer[n.layer] = by_layer.get(n.layer, 0) + 1
             if n.entity_type:
                 by_entity[n.entity_type] = by_entity.get(n.entity_type, 0) + 1
+            if n.layer > 0:
+                if n.is_dev:
+                    dev_count += 1
+                if n.is_bundle:
+                    bundle_count += 1
+                if n.is_cex:
+                    cex_count += 1
+                if n.risk >= 70:
+                    high_risk_count += 1
 
         # ── Write findings back to DataBus (fire-and-forget) ──────────
         # Creates a feedback loop: rugmaps finds risky clusters →
         # rmi-backend uses them for risk scoring → rugmaps queries improved scores.
-        # This is intentionally fire-and-forget — never blocks generate_map().
+        # Task reference is retained so it cannot be garbage-collected mid-flight.
         if risk_score > 50 or risk_level in ("high", "critical"):
-            asyncio.create_task(
+            task = asyncio.create_task(
                 self._databus_ingest_cluster(
                     center_wallet,
                     chain,
@@ -406,6 +484,8 @@ class BubbleMapsPro:
                     len(links),
                 )
             )
+            self._bg_tasks.add(task)
+            task.add_done_callback(self._bg_tasks.discard)
 
         return BubbleMapResult(
             center_address=center_wallet,
@@ -425,68 +505,13 @@ class BubbleMapsPro:
             metadata={"data_source": "databus", "depth": depth},
         )
 
-    async def _expand_layer2(
-        self,
-        address: str,
-        chain: str,
-        nodes: dict[str, BubbleNode],
-        links: list[BubbleLink],
-        seen: set[str],
-        **accounting_flags: bool,
-    ) -> None:
-        """Expand second-hop connections for a wallet."""
-        cluster_data = await self._databus_fetch(
-            "entity_intel",
-            address=address,
-            chain=chain,
-        )
-        if not cluster_data:
-            return
-
+    async def _fetch_counterparties(self, address: str, chain: str) -> list[dict]:
+        """Fetch the raw counterparty list for a wallet (BFS helper)."""
+        cluster_data = await self._databus_fetch("entity_intel", address=address, chain=chain)
+        if not cluster_data or not isinstance(cluster_data, dict):
+            return []
         raw = cluster_data.get("data", cluster_data)
-        counterparties = raw.get("counterparties", raw.get("related_wallets", []))[:30]
-
-        for cp in counterparties:
-            addr = cp.get("address", "") or cp.get("id", "")
-            if not addr or addr in seen:
-                continue
-
-            cp_label_data = await self._get_entity_info(addr, chain)
-            cp_risk = cp_label_data.get("risk_score", cp.get("risk_score", 0))
-            weight = cp.get("weight", cp.get("value", cp.get("pct", 1)))
-            tx_count = cp.get("transactions", cp.get("tx_count", 0))
-
-            is_dev = cp_label_data.get("type") == "developer" or bool(cp.get("is_dev"))
-            is_bundle = cp_label_data.get("type") == "bundle" or bool(cp.get("is_bundle"))
-            is_cex = cp_label_data.get("type") == "exchange" or self._is_cex_label(
-                cp_label_data.get("name", "") or cp_label_data.get("label", "")
-            )
-
-            node = BubbleNode(
-                id=addr,
-                address=addr,
-                label=cp_label_data.get("name", "") or cp_label_data.get("label", cp.get("label", "")),
-                value=float(weight) if isinstance(weight, (int, float)) else 0.5,
-                risk=float(cp_risk) if isinstance(cp_risk, (int, float)) else 0.0,
-                layer=2,
-                is_dev=is_dev,
-                is_bundle=is_bundle,
-                is_cex=is_cex,
-                entity_type=cp_label_data.get("type", ""),
-                tags=cp_label_data.get("tags", []),
-                explorer_url=EXPLORERS.get(chain, EXPLORERS["ethereum"]) + addr,
-            )
-            nodes[addr] = node
-            seen.add(addr)
-
-            links.append(
-                BubbleLink(
-                    source=address,
-                    target=addr,
-                    value=float(tx_count) if tx_count else 0.5,
-                    transactions=int(tx_count) if tx_count else 0,
-                )
-            )
+        return raw.get("counterparties", raw.get("related_wallets", []))
 
     # ── Entity Info & Risk ──────────────────────────────────────────────
 
@@ -515,20 +540,31 @@ class BubbleMapsPro:
         nodes: dict[str, BubbleNode],
         links: list[BubbleLink],
     ) -> tuple[float, str]:
-        """Aggregate risk score from all nodes in the graph."""
-        if not nodes:
+        """Aggregate risk score from all nodes in the graph.
+
+        Value-aware: whales influence the score proportionally to the share of
+        tracked value they control; dev/bundle penalties scale with the value
+        share those cohorts hold rather than being diluted across node count.
+        """
+        outer = [n for n in nodes.values() if n.layer > 0]
+        if not outer:
             return 0.0, "unknown"
 
-        risk_scores = [n.risk for n in nodes.values()]
-        avg_risk = sum(risk_scores) / len(risk_scores)
+        total_value = sum(n.value for n in outer) or 1.0
+        avg_risk = sum(n.risk for n in outer) / len(outer)
+        weighted_risk = sum(n.risk * n.value for n in outer) / total_value
+        # Blend: whale-weighted signal matters, but one wallet cannot fully dominate.
+        base = 0.5 * avg_risk + 0.5 * weighted_risk
 
-        # Weighted by dev/bundle presence
-        dev_count = sum(1 for n in nodes.values() if n.is_dev)
-        bundle_count = sum(1 for n in nodes.values() if n.is_bundle)
-        high_risk_count = sum(1 for r in risk_scores if r >= 70)
+        def _share(pred) -> float:
+            return sum(n.value for n in outer if pred(n)) / total_value
 
-        penalty = (dev_count * 10) + (bundle_count * 8) + (high_risk_count * 5)
-        final_score = min(100, avg_risk + penalty / max(1, len(nodes)))
+        dev_share = _share(lambda n: n.is_dev)
+        bundle_share = _share(lambda n: n.is_bundle)
+        high_risk_count = sum(1 for n in outer if n.risk >= 70)
+
+        penalty = (dev_share * 30) + (bundle_share * 25) + min(high_risk_count * 3, 15)
+        final_score = min(100.0, base + penalty)
 
         return final_score, self._risk_level(final_score)
 
@@ -566,9 +602,15 @@ class BubbleMapsPro:
             "chain": chain,
         }
         try:
+            # Service-to-service auth: X-RMI-Key (RMI_INTERNAL_KEY) — required
+            # by the canonical DataBus ingest route; also exempts CSRF.
+            headers: dict[str, str] = {}
+            service_key = os.getenv("RMI_INTERNAL_KEY", "")
+            if service_key:
+                headers["X-RMI-Key"] = service_key
             # Use a short-lived client to avoid holding connections from the pool
             async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.post(ingest_url, json=payload)
+                resp = await client.post(ingest_url, json=payload, headers=headers)
                 if resp.status_code < 400:
                     logger.info(
                         "databus_ingest_ok",

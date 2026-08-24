@@ -1,7 +1,7 @@
 """
 RugMaps Backend — FastAPI application entry point.
 
-Mounts the bubble maps and honeypot map routers, provides
+Mounts the wallet cluster (bubble map) and honeypot map routers, provides
 health checks and middleware.
 
 Usage:
@@ -55,10 +55,14 @@ def _cors_allowed_origins() -> list[str]:
 
 # ── Lifespan ──────────────────────────────────────────────────────────────
 
+_started_at = time.time()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
+    global _started_at
+    _started_at = time.time()
     logger.info(f"{APP_NAME} v{APP_VERSION} starting...")
     yield
     logger.info(f"{APP_NAME} shutting down...")
@@ -128,5 +132,5 @@ async def health():
         "service": APP_NAME,
         "version": APP_VERSION,
         "status": "ok",
-        "uptime_seconds": 0,
+        "uptime_seconds": int(time.time() - _started_at),
     }

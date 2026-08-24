@@ -336,7 +336,21 @@ class TestDatabusWritebackPayload:
         )
 
         async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.post(INGEST_URL, json=payload)
+            headers = {}
+            service_key = os.getenv("RMI_INTERNAL_KEY", "")
+            if service_key:
+                # Canonical ingest route requires the fleet service key.
+                headers["X-RMI-Key"] = service_key
+            resp = await client.post(INGEST_URL, json=payload, headers=headers)
+
+        # CSRF middleware on rmi-backend rejects headerless browser-style POSTs
+        # with 403 before routing. If we still hit that without a key configured,
+        # skip with the reason rather than fail the suite.
+        if resp.status_code == 403 and "CSRF" in resp.text and not service_key:
+            pytest.skip(
+                "RMI_INTERNAL_KEY not set and rmi-backend CSRF blocks anonymous "
+                "ingest — configure the service key to run this live check"
+            )
 
         # Ingest endpoint should return 202 (accepted) or 200 (processed)
         assert resp.status_code in (200, 202, 429), f"Ingest POST returned {resp.status_code}: {resp.text[:200]}"

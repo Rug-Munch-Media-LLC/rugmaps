@@ -6,16 +6,16 @@ NO litellm proxy, NO paid/external APIs.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import logging
 import os
 import time
 
 import httpx
 
-from app.core.logging import get_logger
-
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 # ── Direct llama.cpp config (NO litellm proxy, NO paid APIs) ──
 # Backend runs in Docker on the rmi_network bridge (172.22.0.0/16); llama.cpp
@@ -29,6 +29,31 @@ AI_MODEL = os.getenv("AI_ANALYSIS_MODEL", "analysis")  # → qwen-analysis
 # Analysis cache (in-memory + Redis if available)
 _analysis_cache: dict[str, dict] = {}
 CACHE_TTL = 3600  # 1 hour
+
+# Verdict guard: below this many graph nodes there is not enough evidence to
+# call a token anything — especially not SAFE. Empty data must never produce
+# a green light.
+MIN_NODES_FOR_VERDICT = 3
+
+
+def insufficient_data_analysis(node_count: int, token_address: str, chain: str) -> dict:
+    """Honest 'cannot judge' analysis — never dress up empty data as SAFE."""
+    return {
+        "status": "insufficient_data",
+        "verdict": "UNKNOWN",
+        "risk_score": None,
+        "summary": (
+            f"Only {node_count} connected wallet(s) found for {token_address[:12]}... on {chain}. "
+            "Insufficient graph data for a reliable verdict — this is NOT a safety signal."
+        ),
+        "red_flags": [],
+        "green_flags": [],
+        "dev_wallets": [],
+        "bundle_wallets": [],
+        "recommendation": "No verdict possible from available data. Verify the address or retry later.",
+        "confidence": 0,
+        "source": "rmi_data_engine",
+    }
 
 
 def _cache_key(token: str, chain: str) -> str:
@@ -61,7 +86,7 @@ def set_cached_analysis(token: str, chain: str, analysis: dict) -> None:
 async def get_token_holders(token_address: str, chain: str) -> list[dict]:
     """Get token holders from our data sources."""
     try:
-        from app.domains.scanner.rugmaps import get_bubble_maps_pro
+        from app.bubble_maps import get_bubble_maps_pro
 
         bm = get_bubble_maps_pro()
         result = await bm.generate_map(center_wallet=token_address, depth=2, min_strength=0.1)
@@ -72,25 +97,33 @@ async def get_token_holders(token_address: str, chain: str) -> list[dict]:
         return []
 
 
-async def get_wallet_labels(addresses: list[str]) -> dict[str, dict]:
+async def get_wallet_labels(addresses: list[str], chain: str = "ethereum") -> dict[str, dict]:
     """Get wallet labels from our ClickHouse/FAISS database."""
     labels = {}
     try:
-        from app.domains.scanner.rugmaps import get_bubble_maps_pro
+        from app.bubble_maps import get_bubble_maps_pro
 
         bm = get_bubble_maps_pro()
-        for addr in addresses[:50]:
-            try:
-                info = await bm._get_entity_info(addr)
-                txs = await bm._get_transactions(addr)
-                risk, level = bm._calculate_risk(txs, node_count=1)
+        infos = await asyncio.gather(
+            *(bm._get_entity_info(addr, chain) for addr in addresses[:50]),
+            return_exceptions=True,
+        )
+        risks = await asyncio.gather(
+            *(bm._calculate_risk(addr, chain) for addr in addresses[:50]),
+            return_exceptions=True,
+        )
+        for addr, info, risk in zip(addresses[:50], infos, risks, strict=False):
+            entity = info if isinstance(info, dict) else {}
+            if isinstance(risk, Exception):
+                risk_score, risk_level = 0, "unknown"
+            else:
+                risk_score, risk_level = risk
+            if entity or risk_score:
                 labels[addr] = {
-                    "entity": info or {},
-                    "risk_score": risk,
-                    "risk_level": level,
+                    "entity": entity,
+                    "risk_score": risk_score,
+                    "risk_level": risk_level,
                 }
-            except (ConnectionError, OSError, TimeoutError):
-                pass
     except Exception as e:
         logger.warning(f"Label fetch error: {e}")
     return labels
@@ -177,8 +210,6 @@ async def _call_llama_for_rugmaps(prompt: str, task_type: str = "analysis", max_
     Returns:
         Raw response text, or None on failure.
     """
-    import re
-
     model = AI_MODEL if task_type == "analysis" else "qwen-chat"
     port = DEEPSEEK_PORT if task_type == "analysis" else QWEN_PORT
     try:
@@ -191,7 +222,8 @@ async def _call_llama_for_rugmaps(prompt: str, task_type: str = "analysis", max_
                     "messages": [
                         {
                             "role": "system",
-                            "content": "You are a blockchain forensic expert. Return ONLY valid JSON, no markdown, no code blocks.",
+                            "content": "You are a blockchain forensic expert. "
+                            "Return ONLY valid JSON, no markdown, no code blocks.",
                         },
                         {"role": "user", "content": prompt},
                     ],
@@ -548,6 +580,14 @@ def _fallback_anomaly_detection(holder_data: dict, scanner_data: dict | None) ->
 # ── Unified Token Graph Analysis (existing — rewired to LiteLLM) ─
 
 
+def _label_names(labels: dict[str, dict], limit: int = 10) -> dict[str, str]:
+    """Compact {addr[:12]: name} map for prompts."""
+    return {
+        a[:12]: lb.get("entity", {}).get("name") or lb.get("entity", {}).get("label") or ""
+        for a, lb in list(labels.items())[:limit]
+    }
+
+
 async def generate_ai_analysis(
     token_address: str,
     chain: str,
@@ -578,7 +618,8 @@ async def generate_ai_analysis(
     link_count = graph_data.get("link_count", 0)
     risk_score = graph_data.get("risk_score", 0)
 
-    prompt = f"""You are RugMunch Intelligence's AI security analyst. Analyze this token using our proprietary on-chain data.
+    prompt = f"""You are RugMunch Intelligence's AI security analyst.
+Analyze this token using our proprietary on-chain data.
 
 TOKEN: {token_address} on {chain}
 
@@ -595,7 +636,7 @@ SIMILAR SCAM PATTERNS (from our FAISS vector database):
 {similar_summary}
 
 WALLET LABELS (from our 393K-label database):
-{json.dumps({a[:12]: lb.get("entity", {}).get("name") or lb.get("entity", {}).get("label") for a, lb in list(labels.items())[:10]})}
+{json.dumps(_label_names(labels), default=str)}
 
 Based on our data, provide a JSON analysis with these fields:
 - "verdict": (SAFE / SUSPICIOUS / HIGH_RISK / SCAM)
@@ -643,6 +684,9 @@ def generate_fallback_analysis(
     link_count: int,
 ) -> dict:
     """Generate analysis purely from our own data when AI is unavailable."""
+    # Verdict guard: tiny graphs get an honest UNKNOWN, never a verdict.
+    if node_count < MIN_NODES_FOR_VERDICT:
+        return insufficient_data_analysis(node_count, f"{node_count}-node-graph", "unknown")
 
     red_flags = []
     green_flags = []
