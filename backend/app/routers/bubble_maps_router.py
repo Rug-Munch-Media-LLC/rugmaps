@@ -175,8 +175,12 @@ async def token_holder_graph(
     # Enrich nodes with labels
     for node in enriched_nodes:
         addr = node.get("address", "")
-        label_data = labels.get(addr, {})
+        label_data = labels.get(addr) if isinstance(labels, dict) else {}
+        if not isinstance(label_data, dict):
+            label_data = {}
         entity = label_data.get("entity", {})
+        if not isinstance(entity, dict):
+            entity = {}
         node["label"] = entity.get("name") or entity.get("label") or node.get("label")
         node["entity_type"] = entity.get("type") or entity.get("entity_type")
         node["is_dev"] = entity.get("is_dev") or entity.get("type") == "developer"
