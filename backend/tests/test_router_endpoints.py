@@ -19,7 +19,7 @@ async def test_analyze_wallet_endpoint(client: AsyncClient):
     from app.bubble_maps import get_bubble_maps_pro
 
     bm = get_bubble_maps_pro()
-    bm._databus_fetch = AsyncMock(return_value=None)
+    bm._databus_fetch = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
     resp = await client.get("/api/v1/rugmaps/analyze/0xabc123?chain=ethereum")
     assert resp.status_code == 200
@@ -41,7 +41,7 @@ async def test_analyze_wallet_minimal_response(client: AsyncClient):
     from app.bubble_maps import get_bubble_maps_pro
 
     bm = get_bubble_maps_pro()
-    bm._databus_fetch = AsyncMock(return_value=None)
+    bm._databus_fetch = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
     resp = await client.get("/api/v1/rugmaps/analyze/0xdeadbeef?chain=solana")
     assert resp.status_code == 200
@@ -59,7 +59,7 @@ async def test_entity_endpoint(client: AsyncClient):
     from app.bubble_maps import get_bubble_maps_pro
 
     bm = get_bubble_maps_pro()
-    bm._databus_fetch = AsyncMock(
+    bm._databus_fetch = AsyncMock(  # type: ignore[method-assign]
         return_value={
             "data": {"labels": [{"name": "Test Entity", "type": "wallet", "risk_score": 25}]},
         }
@@ -82,7 +82,7 @@ async def test_entity_endpoint_no_labels(client: AsyncClient):
     from app.bubble_maps import get_bubble_maps_pro
 
     bm = get_bubble_maps_pro()
-    bm._databus_fetch = AsyncMock(return_value=None)
+    bm._databus_fetch = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
     resp = await client.get("/api/v1/rugmaps/entity/0xunknown?chain=ethereum")
     assert resp.status_code == 200
@@ -109,7 +109,7 @@ async def test_map_endpoint(client: AsyncClient):
     from app.bubble_maps import get_bubble_maps_pro
 
     bm = get_bubble_maps_pro()
-    bm._databus_fetch = AsyncMock(return_value=None)
+    bm._databus_fetch = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
     resp = await client.post(
         "/api/v1/rugmaps/map",
