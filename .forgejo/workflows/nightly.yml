@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Rug Munch Media LLC
+# Nightly deep security scans. Lives in its own workflow because the
+# schedule trigger previously sat inside ci.yml without a matching
+# `schedule:` event — the job could never run (dead code, audit 2026-08-24).
+name: nightly-deep-scan
+
+on:
+  schedule:
+    - cron: '23 3 * * *' # daily 03:23 UTC
+  workflow_dispatch: {}
+
+jobs:
+  nightly-deep-scan:
+    runs-on: docker-x64
+    container:
+      image: nikolaik/python-nodejs:python3.11-nodejs22
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Noseyparker full-history secret hunt
+        run: |
+          curl -sSfL https://github.com/praetorian-inc/noseyparker/releases/latest/download/noseyparker-v0.24.0-x86_64-unknown-linux-gnu.tar.gz | tar xz
+          ./noseyparker-v0.24.0-x86_64-unknown-linux-gnu/noseyparker scan --git-history-format all . || true
+          ./noseyparker-v0.24.0-x86_64-unknown-linux-gnu/noseyparker report || true
+      - name: Grype vulnerability match on working tree
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+          grype dir:. --fail-on critical || echo "::warning::critical vulns in tree"
