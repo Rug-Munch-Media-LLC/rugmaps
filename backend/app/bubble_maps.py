@@ -34,6 +34,67 @@ MAX_DEPTH = 3  # honest traversal cap — layers beyond this add noise, not sign
 MAX_L1_COUNTERPARTIES = 100
 MAX_FRONTIER_PER_LAYER = 60
 
+# ── ClickHouse transfer-graph source (wallet_memory.evm_transfers) ──
+# 1.26B+ transfers across 15 chains — the authoritative edge data for
+# counterparty expansion. Labels tell you WHO a wallet is; transfers tell
+# you WHO IT INTERACTS WITH. Both are required for real cluster graphs.
+CH_HOST = os.environ.get("CLICKHOUSE_HOST", "rmi-clickhouse")
+CH_PORT = int(os.environ.get("CLICKHOUSE_PORT", "9000"))
+CH_USER = os.environ.get("CLICKHOUSE_USER", "rmi")
+CH_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "")
+CH_DATABASE = os.environ.get("CLICKHOUSE_DATABASE", "wallet_memory")
+CH_COUNTERPARTY_LIMIT = int(os.environ.get("RUGMAPS_CH_COUNTERPARTY_LIMIT", "60"))
+
+_ch_client: Any = None
+_ch_lock = asyncio.Lock()
+
+
+def _get_ch_client() -> Any | None:
+    """Lazy-init cached ClickHouse client. Returns None if unavailable."""
+    global _ch_client
+    if _ch_client is not None:
+        return _ch_client
+    try:
+        from clickhouse_driver import Client as CHClient
+
+        _ch_client = CHClient(
+            host=CH_HOST,
+            port=CH_PORT,
+            user=CH_USER,
+            password=CH_PASSWORD or None,
+            database=CH_DATABASE,
+            connect_timeout=3,
+            send_receive_timeout=10,
+        )
+        _ch_client.execute("SELECT 1")
+        return _ch_client
+    except Exception as e:  # noqa: BLE001 — fail-open: graph degrades to labels-only
+        logger.warning("ClickHouse transfer source unavailable: %s", e)
+        _ch_client = None
+        return None
+
+
+def _query_counterparties_sync(address: str, chain: str, limit: int) -> list[dict]:
+    """Blocking ClickHouse counterparty query — run via asyncio.to_thread."""
+    client = _get_ch_client()
+    if client is None:
+        return []
+    addr = address.lower()
+    rows = client.execute(
+        """
+        SELECT addr, sum(cnt) AS total FROM (
+          SELECT to_address AS addr, count() AS cnt FROM evm_transfers
+          WHERE chain = %(chain)s AND from_address = %(addr)s GROUP BY to_address
+          UNION ALL
+          SELECT from_address AS addr, count() AS cnt FROM evm_transfers
+          WHERE chain = %(chain)s AND to_address = %(addr)s GROUP BY from_address
+        ) GROUP BY addr ORDER BY total DESC LIMIT %(limit)s
+        """,
+        {"chain": chain, "addr": addr, "limit": limit},
+    )
+    return [{"address": r[0], "tx_count": int(r[1])} for r in rows]
+
+
 # Supported chains and their explorer URL templates
 EXPLORERS: dict[str, str] = {
     "solana": "https://solscan.io/account/",
@@ -245,7 +306,13 @@ class BubbleMapsPro:
         try:
             params = {k: v for k, v in kwargs.items() if v is not None}
             params.setdefault("consumer_type", "authenticated")
-            resp = await client.get(url, params=params)
+            # Service-to-service auth: verified X-RMI-Key → SERVICE consumer
+            # tier on the DataBus side (full packaging for graph data types).
+            headers: dict[str, str] = {}
+            service_key = os.getenv("RMI_INTERNAL_KEY", "")
+            if service_key:
+                headers["X-RMI-Key"] = service_key
+            resp = await client.get(url, params=params, headers=headers)
             if resp.status_code == 200:
                 data = resp.json()
                 self._cache[cache_key] = (now, data)
@@ -301,6 +368,16 @@ class BubbleMapsPro:
         if cluster_data and isinstance(cluster_data, dict):
             raw = cluster_data.get("data", cluster_data)
             counterparties = raw.get("counterparties", raw.get("related_wallets", []))
+
+        # Primary edge source: ClickHouse transfer graph (1.26B transfers).
+        # Label providers answer WHO a wallet is; only transfers answer WHO
+        # IT INTERACTS WITH. Merge with any DataBus-provided counterparties.
+        ch_counterparties = await self._fetch_counterparties(center_wallet, chain)
+        if ch_counterparties:
+            seen_cp = {(cp.get("address", "") or cp.get("id", "")).lower() for cp in counterparties}
+            for cp in ch_counterparties:
+                if cp["address"] not in seen_cp:
+                    counterparties.append(cp)
 
         # Build the center node
         center_node = BubbleNode(
@@ -506,12 +583,32 @@ class BubbleMapsPro:
         )
 
     async def _fetch_counterparties(self, address: str, chain: str) -> list[dict]:
-        """Fetch the raw counterparty list for a wallet (BFS helper)."""
-        cluster_data = await self._databus_fetch("entity_intel", address=address, chain=chain)
-        if not cluster_data or not isinstance(cluster_data, dict):
-            return []
-        raw = cluster_data.get("data", cluster_data)
-        return raw.get("counterparties", raw.get("related_wallets", []))
+        """Fetch the raw counterparty list for a wallet (BFS helper).
+
+        Primary source: ClickHouse evm_transfers (1.26B transfers, 15 chains)
+        — real transfer-graph edges. Fallback: DataBus entity_intel
+        counterparties/related_wallets when ClickHouse yields nothing.
+        Fail-open: returns [] when both sources are unavailable.
+        """
+        cache_key = f"cp:{chain}:{address.lower()}"
+        now = time.time()
+        if cache_key in self._cache:
+            ts, val = self._cache[cache_key]
+            if now - ts < CACHE_TTL:
+                return val
+        result: list[dict] = []
+        try:
+            result = await asyncio.to_thread(_query_counterparties_sync, address, chain, CH_COUNTERPARTY_LIMIT)
+        except Exception as e:  # noqa: BLE001 — fail-open to DataBus below
+            logger.warning("Counterparty query failed for %s: %s", address[:12], e)
+        if not result:
+            cluster_data = await self._databus_fetch("entity_intel", address=address, chain=chain)
+            if cluster_data and isinstance(cluster_data, dict):
+                raw = cluster_data.get("data", cluster_data)
+                result = raw.get("counterparties", raw.get("related_wallets", [])) or []
+        self._cache[cache_key] = (now, result)
+        self._cache_evict()
+        return result
 
     # ── Entity Info & Risk ──────────────────────────────────────────────
 
