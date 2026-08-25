@@ -10,7 +10,7 @@ canonical · owner=crmuncher · last_updated=2026-08-24
 ## What This Repo Is
 rugmaps — wallet cluster visualization and AI-powered token investigation.
 Deployed: `rugmaps-backend.service` on Talos (:8002); product surface served
-via rmi-frontend's premium `/rugmaps` route. See TRIAGE.md for the current
+via rmi-frontend's premium `/rugmaps` route. Current status: active product
 (active development) disposition.
 
 ## Type
@@ -48,7 +48,7 @@ via rmi-frontend's premium `/rugmaps` route. See TRIAGE.md for the current
 
 ## Status
 
-See [TRIAGE.md](TRIAGE.md) for the disposition decision.
+Status: active product under active development.
 
 ## Owners
 - Primary: crmuncher
