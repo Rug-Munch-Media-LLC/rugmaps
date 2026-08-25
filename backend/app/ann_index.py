@@ -16,7 +16,7 @@ Collections are real Qdrant collections shared fleet-wide:
 Config:
     RAG_API_URL      default http://127.0.0.1:8012/api/v1 (host-side;
                      docker deployments set http://rugbrain-api:8012/api/v1)
-    RMI_RAG_API_KEY  X-API-Key value (gopass → /srv/secrets/rugmaps.env)
+    RMI_RAG_API_KEY  X-API-Key value (deployment secret store)
 """
 
 from __future__ import annotations
