@@ -1,13 +1,12 @@
 # RugMaps
 
-> ⛔ **ARCHIVED / SUPERSEDED (2026-08-30) — production rugmaps code lives in
-> [`rmi-backend`](https://git.rugmunch.io/RugMunchMedia/rmi-backend)
-> (`app/routers/rugmaps_router.py`, `app/domains/rugmaps/`,
-> `app/domains/scanner/rugmaps/graph.py`).** This standalone repo is no longer
-> deployed: the `rugmaps-backend.service` systemd unit was a zombie (running,
-> unwired — no nginx route, no code references) and was stopped/disabled on
-> 2026-08-30. Repo retained for history pending lead sign-off on deletion.
-> Do not develop, deploy, or file issues here.
+> ✅ **ACTIVE STANDALONE PRODUCT (2026-08-30).** RugMaps is a standalone
+> product: this repo carries its own backend engine + frontend. The
+> production API that serves [rugmaps.rugmunch.io](https://rugmaps.rugmunch.io)
+> is implemented in [`rmi-backend`](https://git.rugmunch.io/RugMunchMedia/rmi-backend)
+> (`app/routers/rugmaps_router.py` → `/api/v1/rugmaps/*`, engine in
+> `app/domains/scanner/rugmaps/`) — this repo is the standalone/open-core
+> distribution of the same product. Develop, deploy, and file issues here.
 
 **Visual wallet-intelligence maps — entity relationships, token flows, and
 bubble-map token visualization for crypto forensics.**
