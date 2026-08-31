@@ -116,6 +116,9 @@ class TestBubbleMapsPro:
 
         # DataBus returns None (unavailable)
         bm._databus_fetch = AsyncMock(return_value=None)
+        # ClickHouse transfer graph also unavailable — otherwise the BFS
+        # pulls real counterparties and the map is no longer "minimal".
+        bm._fetch_counterparties = AsyncMock(return_value=[])
 
         result = await bm.generate_map(
             center_wallet="0xabc...",
