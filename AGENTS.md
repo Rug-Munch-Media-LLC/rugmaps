@@ -19,7 +19,7 @@ via rmi-frontend's premium `/rugmaps` route. Current status: active product
 ## Where It Lives
 - Source: `https://git.rugmunch.io/RugMunchMedia/rugmaps`
 - Deployment: systemd `rugmaps-backend.service`, 127.0.0.1:8002
-- DataBus auth: `RMI_INTERNAL_KEY` via `/srv/secrets/rugmaps.env`
+- DataBus auth: `RMI_INTERNAL_KEY` via a secrets env file (path supplied at deploy).
   (systemd drop-in) — required for DataBus ingest writeback.
 
 ## Built With
@@ -33,7 +33,7 @@ via rmi-frontend's premium `/rugmaps` route. Current status: active product
    graph data (< MIN_NODES_FOR_VERDICT nodes). Empty data ≠ safe token.
 2. **No nested repos.** Don't commit other complete project trees inside this one.
 3. **No secrets.** Never commit `.secrets/`, `.env`, `*.pem`, `*.key`, `*.crt`.
-   Service keys come from gopass → /srv/secrets → systemd env only.
+   Service keys come from the secrets manager → systemd env only.
 4. **No data blobs.** Don't commit `*.zip`, `*.parquet`, model weights, sqlite files.
 5. **Competitor naming.** Do not introduce new "bubblemaps"/"BubbleMaps.com"
    references — brand everything RugMaps (rebrand scrub in progress).

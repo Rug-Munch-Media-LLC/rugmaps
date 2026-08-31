@@ -18,10 +18,10 @@ import httpx
 logger = logging.getLogger(__name__)
 
 # ── Direct llama.cpp config (NO litellm proxy, NO paid APIs) ──
-# Backend runs in Docker on the rmi_network bridge (172.22.0.0/16); llama.cpp
-# runs on the HOST, so the container reaches it via the docker bridge gateway
-# 172.22.0.1 — NOT 127.0.0.1 (that's the container itself).
-LLAMA_HOST = os.getenv("LLAMA_HOST", "172.22.0.1")
+# llama.cpp runs on the host and binds loopback; LLAMA_HOST must be the
+# host-reachable address from the backend's perspective (127.0.0.1 when the
+# backend runs on the host, the docker host gateway in containerized setups).
+LLAMA_HOST = os.getenv("LLAMA_HOST", "127.0.0.1")
 QWEN_PORT = 8085  # qwen-chat (Qwen3-4B-Abliterated, fast)
 DEEPSEEK_PORT = 8086  # qwen-analysis (Qwen3.5-9B, reasoning)
 AI_MODEL = os.getenv("AI_ANALYSIS_MODEL", "analysis")  # → qwen-analysis
