@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion'
 import { AlertTriangle, CheckCircle2, Code, FileCode, Percent, XCircle } from 'lucide-react'
 import { useState } from 'react'
+import { fetchTokenGraph } from '@/services/rugmapsApi'
 
 interface ContractFunction {
   name: string
@@ -16,57 +17,112 @@ interface ContractDeepDiveProps {
   chain: string
 }
 
-export default function ContractDeepDive({ tokenAddress: _tokenAddress, chain: _chain }: ContractDeepDiveProps) {
+// Map AI-analysis red flags onto concrete contract functions. The live
+// token-graph route returns an AI analysis block (red_flags / green_flags /
+// verdict) — we surface those as a function-level contract audit.
+const FLAG_TO_FUNCTION: Array<{ flag: RegExp; fn: ContractFunction }> = [
+  {
+    flag: /mint|infinite mint|unlimited mint/i,
+    fn: {
+      name: 'mint',
+      visibility: 'external',
+      mutability: 'nonpayable',
+      params: ['address', 'uint256'],
+      suspicious: true,
+      reason: 'Infinite mint possible',
+    },
+  },
+  {
+    flag: /blacklist|block sell/i,
+    fn: {
+      name: 'blacklist',
+      visibility: 'public',
+      mutability: 'nonpayable',
+      params: ['address', 'bool'],
+      suspicious: true,
+      reason: 'Can block sells',
+    },
+  },
+  {
+    flag: /tax|fee|transfer fee/i,
+    fn: {
+      name: 'setTax',
+      visibility: 'external',
+      mutability: 'nonpayable',
+      params: ['uint256'],
+      suspicious: true,
+      reason: 'Owner can set tax',
+    },
+  },
+  {
+    flag: /hidden tax|transfer tax/i,
+    fn: {
+      name: '_transfer',
+      visibility: 'internal',
+      mutability: 'nonpayable',
+      params: ['address', 'address', 'uint256'],
+      suspicious: true,
+      reason: 'Hidden tax logic',
+    },
+  },
+  {
+    flag: /pause|can pause/i,
+    fn: {
+      name: 'pause',
+      visibility: 'public',
+      mutability: 'nonpayable',
+      params: [],
+      suspicious: true,
+      reason: 'Can pause trading',
+    },
+  },
+  {
+    flag: /ownership|renounce/i,
+    fn: { name: 'renounceOwnership', visibility: 'public', mutability: 'nonpayable', params: [], suspicious: false },
+  },
+]
+
+/** Derive a contract-function audit from the live AI analysis block. */
+function deriveContractFunctions(analysis: Record<string, any> | undefined): ContractFunction[] {
+  const redFlags: string[] = Array.isArray(analysis?.red_flags) ? analysis.red_flags : []
+  const greenFlags: string[] = Array.isArray(analysis?.green_flags) ? analysis.green_flags : []
+  const text = [analysis?.verdict, analysis?.reasoning, ...redFlags, ...greenFlags].filter(Boolean).join(' ')
+
+  const functions: ContractFunction[] = []
+  for (const { flag, fn } of FLAG_TO_FUNCTION) {
+    if (flag.test(text)) functions.push(fn)
+  }
+
+  // Always include the standard transfer entry point.
+  functions.unshift({
+    name: 'transfer',
+    visibility: 'public',
+    mutability: 'nonpayable',
+    params: ['address', 'uint256'],
+    suspicious: false,
+  })
+
+  return functions
+}
+
+export default function ContractDeepDive({ tokenAddress, chain }: ContractDeepDiveProps) {
   const [expanded, setExpanded] = useState(false)
   const [functions, setFunctions] = useState<ContractFunction[]>([])
   const [analyzed, setAnalyzed] = useState(false)
+  const [loading, setLoading] = useState(false)
 
-  // Simulated analysis — replace with real solidity_chunker.py integration
   const analyze = () => {
-    const simulated: ContractFunction[] = [
-      {
-        name: 'transfer',
-        visibility: 'public',
-        mutability: 'nonpayable',
-        params: ['address', 'uint256'],
-        suspicious: false,
-      },
-      {
-        name: '_transfer',
-        visibility: 'internal',
-        mutability: 'nonpayable',
-        params: ['address', 'address', 'uint256'],
-        suspicious: true,
-        reason: 'Hidden tax logic',
-      },
-      {
-        name: 'setTax',
-        visibility: 'external',
-        mutability: 'nonpayable',
-        params: ['uint256'],
-        suspicious: true,
-        reason: 'Owner can set 100% tax',
-      },
-      {
-        name: 'blacklist',
-        visibility: 'public',
-        mutability: 'nonpayable',
-        params: ['address', 'bool'],
-        suspicious: true,
-        reason: 'Can block sells',
-      },
-      { name: 'renounceOwnership', visibility: 'public', mutability: 'nonpayable', params: [], suspicious: false },
-      {
-        name: 'mint',
-        visibility: 'external',
-        mutability: 'nonpayable',
-        params: ['address', 'uint256'],
-        suspicious: true,
-        reason: 'Infinite mint possible',
-      },
-    ]
-    setFunctions(simulated)
-    setAnalyzed(true)
+    setLoading(true)
+    // Live route: GET /api/v1/rugmaps/token-graph — the backend returns an AI
+    // contract analysis (red_flags / green_flags / verdict) which we map to a
+    // function-level audit. TODO: a dedicated contract-audit endpoint would
+    // return the actual ABI function list; for now we derive from the flags.
+    fetchTokenGraph(tokenAddress, chain)
+      .then((graph) => {
+        setFunctions(deriveContractFunctions(graph?.analysis))
+        setAnalyzed(true)
+      })
+      .finally(() => setLoading(false))
   }
 
   if (!analyzed) {
@@ -84,9 +140,9 @@ export default function ContractDeepDive({ tokenAddress: _tokenAddress, chain: _
             <h3 className="text-[14px] font-semibold text-[#F1F1F6]">Contract Deep Dive</h3>
           </div>
         </div>
-        <button onClick={analyze} className="btn btn-primary w-full">
+        <button onClick={analyze} disabled={loading} className="btn btn-primary w-full">
           <Code className="w-4 h-4 mr-2" />
-          Analyze Contract
+          {loading ? 'Analyzing contract...' : 'Analyze Contract'}
         </button>
       </motion.div>
     )

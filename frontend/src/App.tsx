@@ -1,53 +1,23 @@
-import { Activity, Crosshair, Map as MapIcon } from 'lucide-react'
+import { Activity, Crosshair, Map as MapIcon, Search } from 'lucide-react'
 import { useState } from 'react'
-import { Link, Route, Routes } from 'react-router-dom'
-import type { BubbleMapData } from '@/components/rugmaps/BubbleMapCanvas'
-import BubbleMapCanvas from '@/components/rugmaps/BubbleMapCanvas'
-import type { TokenGraphEdge, TokenGraphNode } from '@/components/rugmaps/TokenGraphCanvas'
-import TokenGraphCanvas from '@/components/rugmaps/TokenGraphCanvas'
+import { Link, Route, Routes, useNavigate } from 'react-router-dom'
+import SearchPage from '@/pages/SearchPage'
+import TokenPage from '@/pages/TokenPage'
 
-/** Deterministic seeded PRNG (mulberry32) so the demo graph is stable across builds. */
-function seededRandom(seed: number): () => number {
-  let state = seed >>> 0
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0
-    let t = state
-    t = Math.imul(t ^ (t >>> 15), t | 1)
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
-
-/** Generate a scale-testing graph with a few dense hubs + peripheral holders. */
-function buildDemoTokenGraph(
-  nodeCount: number,
-  edgeCount: number,
-  seed: number,
-): { nodes: TokenGraphNode[]; edges: TokenGraphEdge[] } {
-  const rand = seededRandom(seed)
-  const hubs = Math.max(2, Math.floor(nodeCount * 0.06))
-  const nodes: TokenGraphNode[] = Array.from({ length: nodeCount }, (_, index) => {
-    const isHub = index < hubs
-    return {
-      id: `0x${index.toString(16).padStart(8, '0')}`,
-      label: isHub ? `Hub ${index + 1}` : undefined,
-      size: isHub ? 20 + Math.floor(rand() * 18) : undefined,
-    }
-  })
-  const edges: TokenGraphEdge[] = []
-  for (let index = 0; index < edgeCount; index += 1) {
-    const target = hubs + Math.floor(rand() * (nodeCount - hubs))
-    const source = rand() < 0.65 ? Math.floor(rand() * hubs) : hubs + Math.floor(rand() * (nodeCount - hubs))
-    if (source === target) continue
-    edges.push({ source: nodes[source]?.id ?? '', target: nodes[target]?.id ?? '', value: 1 + Math.floor(rand() * 20) })
-  }
-  return { nodes, edges }
-}
-
-const LARGE_DEMO_GRAPH = buildDemoTokenGraph(400, 1100, 0x5eed)
-const TINY_DEMO_GRAPH = buildDemoTokenGraph(6, 8, 0x51e0)
+const CHAINS = ['solana', 'ethereum', 'base', 'bsc', 'arbitrum', 'optimism', 'polygon']
 
 function HomePage() {
+  const [query, setQuery] = useState('')
+  const [chain, setChain] = useState('solana')
+  const navigate = useNavigate()
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault()
+    const q = query.trim()
+    if (!q) return
+    navigate(`/token/${chain}/${encodeURIComponent(q)}`)
+  }
+
   return (
     <div className="min-h-screen bg-[#08080e] text-[#F1F1F6]">
       <header className="border-b border-white/5 px-6 py-4 flex items-center justify-between">
@@ -61,11 +31,11 @@ function HomePage() {
           </div>
         </div>
         <nav className="flex items-center gap-4">
-          <Link to="/" className="text-xs text-[#9DA0B0] hover:text-white transition-colors">
+          <Link to="/" className="text-xs text-purple-400 hover:text-white transition-colors">
             Home
           </Link>
-          <Link to="/demo" className="text-xs text-[#9DA0B0] hover:text-white transition-colors">
-            Demo
+          <Link to="/search" className="text-xs text-[#9DA0B0] hover:text-white transition-colors">
+            Search
           </Link>
         </nav>
       </header>
@@ -81,15 +51,57 @@ function HomePage() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-12">
+        {/* Search bar */}
+        <form
+          onSubmit={handleSearch}
+          className="max-w-2xl mx-auto mb-12 rounded-2xl border border-white/5 bg-white/[0.015] p-3 flex flex-col md:flex-row gap-2"
+        >
+          <div className="flex-1 relative">
+            <Search className="w-4 h-4 text-[#5C6080] absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search token by address or name..."
+              className="w-full bg-[#0C1220]/60 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-sm text-[#F1F1F6] placeholder:text-[#5C6080] focus:outline-none focus:border-purple-500/40"
+            />
+          </div>
+          <select
+            value={chain}
+            onChange={(e) => setChain(e.target.value)}
+            className="bg-[#0C1220]/60 border border-white/10 rounded-xl px-4 py-3 text-sm text-[#F1F1F6] focus:outline-none focus:border-purple-500/40"
+          >
+            {CHAINS.map((c) => (
+              <option key={c} value={c} className="bg-[#0C1220]">
+                {c}
+              </option>
+            ))}
+          </select>
+          <button
+            type="submit"
+            disabled={!query.trim()}
+            className="btn btn-primary px-6 py-3 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Search className="w-4 h-4 mr-2" />
+            Analyze
+          </button>
+        </form>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {[
-            { icon: MapIcon, label: 'Bubble Map', desc: 'Holder distribution graph', color: 'purple' },
-            { icon: Activity, label: 'Bundle Detection', desc: 'Identify coordinated clusters', color: 'orange' },
-            { icon: Crosshair, label: 'Gas Tracing', desc: 'Follow funding sources', color: 'red' },
+            { icon: MapIcon, label: 'Bubble Map', desc: 'Holder distribution graph', color: 'purple', to: '/search' },
+            {
+              icon: Activity,
+              label: 'Bundle Detection',
+              desc: 'Identify coordinated clusters',
+              color: 'orange',
+              to: '/search',
+            },
+            { icon: Crosshair, label: 'Gas Tracing', desc: 'Follow funding sources', color: 'red', to: '/search' },
           ].map((item) => (
             <Link
               key={item.label}
-              to="/demo"
+              to={item.to}
               className="p-4 rounded-xl border border-white/5 bg-white/[0.015] hover:bg-white/[0.03] hover:border-purple-500/20 transition-all"
             >
               <div className={`w-9 h-9 rounded-lg bg-${item.color}-500/10 flex items-center justify-center mb-3`}>
@@ -105,120 +117,12 @@ function HomePage() {
   )
 }
 
-function DemoPage() {
-  const [data] = useState<BubbleMapData | null>({
-    nodes: [
-      {
-        id: 'center',
-        address: '0x1234...5678',
-        value: 35,
-        risk: 0,
-        color: '#8B5CF6',
-        layer: 0,
-        label: 'Token Contract',
-      },
-      {
-        id: 'dev1',
-        address: '0xdev1...0001',
-        value: 12,
-        risk: 85,
-        color: '#FF3366',
-        layer: 1,
-        isDev: true,
-        label: 'Dev Wallet A',
-      },
-      {
-        id: 'bundle1',
-        address: '0xbun...dle1',
-        value: 8,
-        risk: 65,
-        color: '#FF9800',
-        layer: 1,
-        isBundle: true,
-        label: 'Bundle Wallet 1',
-      },
-      {
-        id: 'bundle2',
-        address: '0xbun...dle2',
-        value: 7,
-        risk: 60,
-        color: '#FF9800',
-        layer: 1,
-        isBundle: true,
-        label: 'Bundle Wallet 2',
-      },
-      { id: 'holder1', address: '0xhol...der1', value: 5, risk: 20, color: '#28CBF4', layer: 2, label: 'Holder A' },
-      { id: 'holder2', address: '0xhol...der2', value: 4, risk: 15, color: '#28CBF4', layer: 2, label: 'Holder B' },
-      { id: 'holder3', address: '0xhol...der3', value: 3, risk: 10, color: '#28CBF4', layer: 2, label: 'Holder C' },
-      { id: 'holder4', address: '0xhol...der4', value: 3, risk: 25, color: '#22C55E', layer: 2, label: 'Holder D' },
-    ],
-    links: [
-      { source: 'center', target: 'dev1', value: 10, transactions: 45 },
-      { source: 'center', target: 'bundle1', value: 8, transactions: 32 },
-      { source: 'center', target: 'bundle2', value: 6, transactions: 28 },
-      { source: 'center', target: 'holder1', value: 3, transactions: 5 },
-      { source: 'center', target: 'holder2', value: 2, transactions: 3 },
-      { source: 'center', target: 'holder3', value: 1, transactions: 2 },
-      { source: 'center', target: 'holder4', value: 1, transactions: 2 },
-      { source: 'dev1', target: 'bundle1', value: 5, transactions: 15 },
-      { source: 'dev1', target: 'bundle2', value: 4, transactions: 12 },
-    ],
-    risk_score: 72,
-    risk_level: 'high',
-  })
-
-  return (
-    <div className="min-h-screen bg-[#08080e] text-[#F1F1F6]">
-      <header className="border-b border-white/5 px-6 py-3 flex items-center justify-between">
-        <Link to="/" className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500 to-purple-700 flex items-center justify-center">
-            <Crosshair className="w-[15px] h-[15px] text-white" />
-          </div>
-          <span className="text-sm font-bold">RugMaps Demo</span>
-        </Link>
-        <span className="text-[10px] text-[#5C6080] font-mono">
-          solana · EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
-        </span>
-      </header>
-
-      <main className="max-w-7xl mx-auto px-4 py-6">
-        <div className="mb-4">
-          <h2 className="text-lg font-bold">Holder Distribution</h2>
-          <p className="text-[11px] text-[#5C6080]">
-            Risk Score: <span className="text-red-400 font-semibold">72/100 (High)</span>
-          </p>
-        </div>
-        <BubbleMapCanvas data={data} chain="solana" width={900} height={550} />
-
-        <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <section className="rounded-xl border border-white/5 bg-white/[0.015] p-4">
-            <h2 className="text-sm font-bold mb-1">Large Graph — G6 force-atlas2</h2>
-            <p className="text-[11px] text-[#5C6080] mb-3">
-              {LARGE_DEMO_GRAPH.nodes.length} nodes / {LARGE_DEMO_GRAPH.edges.length} edges · scroll to zoom · drag to
-              pan · hover for details
-            </p>
-            <TokenGraphCanvas nodes={LARGE_DEMO_GRAPH.nodes} edges={LARGE_DEMO_GRAPH.edges} width={860} height={440} />
-          </section>
-
-          <section className="rounded-xl border border-white/5 bg-white/[0.015] p-4">
-            <h2 className="text-sm font-bold mb-1">Tiny Graph — lightweight fallback</h2>
-            <p className="text-[11px] text-[#5C6080] mb-3">
-              {TINY_DEMO_GRAPH.nodes.length} nodes / {TINY_DEMO_GRAPH.edges.length} edges · d3-force layout with all
-              labels
-            </p>
-            <TokenGraphCanvas nodes={TINY_DEMO_GRAPH.nodes} edges={TINY_DEMO_GRAPH.edges} width={860} height={440} />
-          </section>
-        </div>
-      </main>
-    </div>
-  )
-}
-
 export default function App() {
   return (
     <Routes>
       <Route path="/" element={<HomePage />} />
-      <Route path="/demo" element={<DemoPage />} />
+      <Route path="/search" element={<SearchPage />} />
+      <Route path="/token/:chain/:address" element={<TokenPage />} />
     </Routes>
   )
 }

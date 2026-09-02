@@ -51,6 +51,77 @@ export interface DeployerProfileResponse {
   real_deployer: string | null
 }
 
+/** A single enriched holder node from the live /rugmaps/token-graph route. */
+export interface TokenGraphNode {
+  id?: string
+  address: string
+  label?: string | null
+  name?: string | null
+  entity_type?: string | null
+  is_dev?: boolean
+  is_bundle?: boolean
+  risk?: number
+  risk_score?: number
+  risk_level?: string
+  tags?: string[]
+  layer?: number
+  value?: number
+  supply_pct?: number
+  pct?: number
+  explorer_url?: string
+  // biome-ignore lint/suspicious/noExplicitAny: extra node fields vary by chain
+  [key: string]: any
+}
+
+export interface TokenGraphLink {
+  source: string
+  target: string
+  value?: number
+  transactions?: number
+}
+
+/** AI analysis block returned by the live /rugmaps/token-graph route. */
+export interface TokenGraphAnalysis {
+  verdict?: string
+  confidence?: number
+  reasoning?: string
+  red_flags?: string[]
+  green_flags?: string[]
+  // biome-ignore lint/suspicious/noExplicitAny: analysis shape varies by model
+  [key: string]: any
+}
+
+/** A similar-scam doc returned by the live /rugmaps/token-graph route (RAG). */
+export interface SimilarScam {
+  id?: string
+  title?: string
+  content?: string
+  excerpt?: string
+  relevance_score?: number
+  score?: number
+  source?: string
+  // biome-ignore lint/suspicious/noExplicitAny: scam doc fields vary
+  [key: string]: any
+}
+
+/** Full holder-graph payload from the live /rugmaps/token-graph route. */
+export interface TokenGraphResult {
+  token_address: string
+  chain: string
+  nodes: TokenGraphNode[]
+  links: TokenGraphLink[]
+  node_count: number
+  link_count: number
+  risk_score: number
+  risk_level: string
+  stats: Record<string, any>
+  analysis?: TokenGraphAnalysis
+  similar_scams?: SimilarScam[]
+  wallet_labels_count?: number
+  from_cache?: boolean
+  data_quality?: string
+}
+
 export const API_BASE = '/api/v1'
 
 /** Holder-graph summary for a token (live: rugmaps_router.rugmaps_analysis). */
@@ -116,6 +187,12 @@ export function fetchFundFlows(params: {
 
 export function fetchDeployerProfile(address: string, chain = 'solana'): Promise<DeployerProfileResponse | null> {
   return getJson<DeployerProfileResponse>(deployerProfileUrl(address, chain))
+}
+
+/** Full holder graph + AI analysis + RAG similar-scams (live: token_holder_graph). */
+export function fetchTokenGraph(tokenAddress: string, chain = 'solana', limit = 50): Promise<TokenGraphResult | null> {
+  const qs = new URLSearchParams({ token_address: tokenAddress, chain, limit: String(limit) })
+  return getJson<TokenGraphResult>(`${API_BASE}/rugmaps/token-graph?${qs.toString()}`)
 }
 
 /** Raw transfer record shape produced by {@link fundFlowsToRawHops}. */

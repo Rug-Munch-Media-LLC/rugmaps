@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion'
 import { Activity, AlertTriangle, Bot, Loader2, ShieldCheck, Users, Zap } from 'lucide-react'
 import { useState } from 'react'
+import { fetchTokenGraph, type TokenGraphNode } from '@/services/rugmapsApi'
 
 interface BotSuite {
   name: string
@@ -15,41 +16,58 @@ interface BotNetworkPanelProps {
   chain: string
 }
 
-const KNOWN_BOTS = [
-  { name: 'Axiom', pattern: 'jito_bundle', signature: 'high_gas_first_block' },
-  { name: 'Bloom', pattern: 'bloXroute', signature: 'coordinated_entry' },
-  { name: 'Photon', pattern: 'mev_bundle', signature: 'sandwich_pattern' },
-  { name: 'GMGN', pattern: 'aggregator', signature: 'multi_dex_split' },
-  { name: 'Trojan', pattern: 'copycat', signature: 'identical_tx_structure' },
-  { name: 'Padre', pattern: 'volume_bot', signature: 'wash_cycle_3s' },
+// Known bot-suite signatures matched against node entity types / tags returned
+// by the live token-graph route. The backend labels wallets with entity types
+// (e.g. "bundle", "sniper", "mev", "aggregator") — we surface those as suites.
+const BOT_SIGNATURES: Array<{ name: string; match: RegExp; pattern: string }> = [
+  { name: 'Bundle Bot', match: /bundle|bundl/i, pattern: 'coordinated_entry' },
+  { name: 'Sniper Bot', match: /sniper|snip/i, pattern: 'first_block_entry' },
+  { name: 'MEV Bot', match: /mev|sandwich|jito/i, pattern: 'mev_bundle' },
+  { name: 'Volume Bot', match: /volume|wash/i, pattern: 'wash_cycle' },
+  { name: 'Aggregator', match: /aggregator|multi.?dex/i, pattern: 'multi_dex_split' },
+  { name: 'Copycat', match: /copycat|copy.?trade/i, pattern: 'identical_tx_structure' },
 ]
 
-export default function BotNetworkPanel({ tokenAddress: _tokenAddress, chain: _chain }: BotNetworkPanelProps) {
+/** Derive bot suites from the enriched holder nodes returned by the API. */
+function deriveBotSuites(nodes: TokenGraphNode[]): BotSuite[] {
+  const suites: BotSuite[] = []
+  for (const sig of BOT_SIGNATURES) {
+    const matches = nodes.filter((n) => {
+      const haystack = [n.entity_type, n.label, n.name, ...(Array.isArray(n.tags) ? n.tags : [])]
+        .filter(Boolean)
+        .join(' ')
+      return sig.match.test(haystack)
+    })
+    if (matches.length === 0) continue
+    const avgRisk = matches.reduce((s, n) => s + (n.risk ?? n.risk_score ?? 0), 0) / matches.length
+    suites.push({
+      name: sig.name,
+      confidence: Math.min(99, Math.round(60 + avgRisk * 0.4)),
+      wallets: matches.length,
+      volumeFake: Math.min(95, Math.round(avgRisk * 0.9)),
+      pattern: sig.pattern,
+    })
+  }
+  return suites
+}
+
+export default function BotNetworkPanel({ tokenAddress, chain }: BotNetworkPanelProps) {
   const [bots, setBots] = useState<BotSuite[]>([])
   const [loading, setLoading] = useState(false)
   const [analyzed, setAnalyzed] = useState(false)
 
   const detectBots = () => {
     setLoading(true)
-    // Simulate detection — replace with real stealthDetection.ts integration
-    setTimeout(() => {
-      const detected: BotSuite[] = []
-      const numBots = Math.floor(Math.random() * 3) + 1
-      for (let i = 0; i < numBots; i++) {
-        const bot = KNOWN_BOTS[Math.floor(Math.random() * KNOWN_BOTS.length)]!
-        if (!bot) continue
-        detected.push({
-          name: bot.name,
-          confidence: Math.floor(Math.random() * 30) + 70,
-          wallets: Math.floor(Math.random() * 15) + 3,
-          volumeFake: Math.random() * 80 + 10,
-          pattern: bot.pattern,
-        })
-      }
-      setBots(detected)
-      setLoading(false)
-      setAnalyzed(true)
-    }, 2000)
+    // Live route: GET /api/v1/rugmaps/token-graph — the backend enriches each
+    // holder node with entity_type / tags / is_bundle, which we map to bot
+    // suites. TODO: a dedicated bot-detection endpoint would return confidence
+    // + fake-volume directly; for now we derive them from node risk.
+    fetchTokenGraph(tokenAddress, chain)
+      .then((graph) => {
+        setBots(deriveBotSuites(graph?.nodes ?? []))
+        setAnalyzed(true)
+      })
+      .finally(() => setLoading(false))
   }
 
   if (!analyzed) {

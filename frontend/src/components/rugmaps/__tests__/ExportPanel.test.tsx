@@ -1,8 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-
-import ExportPanel from '../ExportPanel'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AIAnalysisResult, ScanResult, SentinelResult } from '@/types'
+import ExportPanel from '../ExportPanel'
 
 // ExportPanel must export the REAL data it is given — the 2026-08-21 audit
 // flagged fabricated panel data across the rugcharts/rugmaps frontends. The

@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion'
 import { AlertTriangle, ArrowRight, Fuel, Landmark, Loader2, Wallet, Wind } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { fetchFundFlows, fundFlowsToRawHops, type RawFundFlowHop } from '@/services/rugmapsApi'
 
 interface FundingNode {
   address: string
@@ -23,51 +24,92 @@ interface GasFundingTracerProps {
   deployerAddress?: string
 }
 
-export default function GasFundingTracer({
-  tokenAddress: _tokenAddress,
-  chain,
-  deployerAddress,
-}: GasFundingTracerProps) {
+const CEX_HINTS = /binance|coinbase|kraken|okx|bybit|kucoin|exchange|cex/i
+const MIXER_HINTS = /tornado|mixer|railgun|aztec|obfuscat/i
+
+/** Classify a funding hop's counterparty into a node type. */
+function classifyNode(label: string | undefined): FundingNode['type'] {
+  if (label && CEX_HINTS.test(label)) return 'cex'
+  if (label && MIXER_HINTS.test(label)) return 'mixer'
+  if (/scam|rug|honeypot/i.test(label ?? '')) return 'scam'
+  return 'wallet'
+}
+
+/** Build a backward funding path from the live fund-flow hops. */
+function buildFundingPath(hops: RawFundFlowHop[], deployerAddress: string): FundingPath | null {
+  if (hops.length === 0) return null
+
+  // The tracer is a backward trace: inbound records (funders → deployer) come
+  // first. Walk them to reconstruct the path ending at the deployer.
+  const nodes: FundingNode[] = []
+  const flags: string[] = []
+  let totalAmount = 0
+
+  for (const hop of hops) {
+    const fromType = classifyNode(hop.from_address)
+    const toType = classifyNode(hop.to_address)
+    const isDeployerHop = hop.to_address === deployerAddress || hop.direction === 'inbound'
+
+    if (fromType === 'cex') flags.push('cex_funded')
+    if (fromType === 'mixer') flags.push('mixer_used')
+
+    nodes.push({
+      address: hop.from_address || hop.to_address,
+      label: fromType === 'cex' ? 'CEX Hot Wallet' : fromType === 'mixer' ? 'Mixer' : 'Intermediate',
+      type: fromType,
+      amount: hop.amount_usd,
+      timestamp: Date.now(),
+    })
+
+    if (isDeployerHop) {
+      nodes.push({
+        address: deployerAddress,
+        label: 'Deployer',
+        type: toType === 'wallet' ? 'wallet' : toType,
+        amount: hop.amount_usd,
+        timestamp: Date.now(),
+      })
+      totalAmount += hop.amount_usd
+    }
+  }
+
+  // Deduplicate consecutive identical addresses.
+  const deduped: FundingNode[] = []
+  for (const node of nodes) {
+    const last = deduped[deduped.length - 1]
+    if (last && last.address === node.address) continue
+    deduped.push(node)
+  }
+
+  if (deduped.length === 0) return null
+
+  const confidence = Math.min(99, 60 + deduped.length * 5 + (flags.length > 0 ? 10 : 0))
+  return {
+    nodes: deduped.slice(0, 8),
+    totalAmount,
+    confidence,
+    flags: Array.from(new Set(flags)),
+  }
+}
+
+export default function GasFundingTracer({ tokenAddress, chain, deployerAddress }: GasFundingTracerProps) {
   const [path, setPath] = useState<FundingPath | null>(null)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     if (!deployerAddress) return
     setLoading(true)
-    // Simulate API call — replace with real backend integration
-    setTimeout(() => {
-      setPath({
-        nodes: [
-          {
-            address: '0xCEX...1234',
-            label: 'Binance Hot Wallet',
-            type: 'cex',
-            amount: 5.2,
-            timestamp: Date.now() - 86400000 * 3,
-          },
-          {
-            address: '0xMIX...5678',
-            label: 'Tornado Cash',
-            type: 'mixer',
-            amount: 4.8,
-            timestamp: Date.now() - 86400000 * 2,
-          },
-          {
-            address: '0xTMP...9012',
-            label: 'Intermediate',
-            type: 'wallet',
-            amount: 2.1,
-            timestamp: Date.now() - 86400000 * 1,
-          },
-          { address: deployerAddress, label: 'Deployer', type: 'wallet', amount: 1.5, timestamp: Date.now() - 3600000 },
-        ],
-        totalAmount: 1.5,
-        confidence: 87,
-        flags: ['mixer_used', 'intermediate_wallet', 'cex_funded'],
+    // Live route: GET /api/v1/rugmaps/fund-flows?token&address&chain&hops
+    // (via services/rugmapsApi.ts). TODO: this route lives on the rmi-backend
+    // deployment; if the standalone rugmaps backend does not expose it, the
+    // fetch returns null and the panel renders an honest empty state.
+    fetchFundFlows({ token: tokenAddress, address: deployerAddress, chain, hops: 2 })
+      .then((data) => {
+        const hops = fundFlowsToRawHops(data)
+        setPath(buildFundingPath(hops, deployerAddress))
       })
-      setLoading(false)
-    }, 1500)
-  }, [deployerAddress])
+      .finally(() => setLoading(false))
+  }, [tokenAddress, chain, deployerAddress])
 
   if (!deployerAddress) return null
 
