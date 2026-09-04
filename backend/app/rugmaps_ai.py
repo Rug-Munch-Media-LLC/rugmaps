@@ -83,8 +83,84 @@ def set_cached_analysis(token: str, chain: str, analysis: dict) -> None:
             del _analysis_cache[k]
 
 
+# ── Solana SPL holder source (Helius getTokenLargestAccounts) ──
+# Key is read from the environment (never hardcoded) — same pattern as the
+# rmi-backend Helius tools. Fail-open: any error returns [] so the caller
+# degrades to the graph-based holder path instead of 500ing.
+HELIUS_API_KEY = os.getenv("HELIUS_API_KEY", "").strip()
+HELIUS_RPC_URL = f"https://mainnet.helius-rpc.com/?api-key={HELIUS_API_KEY}"
+HELIUS_TIMEOUT = 8.0
+
+
+async def get_solana_holders(token_address: str) -> list[dict]:
+    """Fetch top SPL token holders via Helius ``getTokenLargestAccounts``.
+
+    Returns the same holder contract as the EVM path:
+    ``[{address, amount, percentage, label}]`` where ``amount`` is the raw
+    token balance, ``percentage`` is the share of the sampled largest-account
+    supply (0-100), and ``label`` is an empty string (no label source here).
+
+    Fail-open: returns ``[]`` when the key is unset, the RPC errors, or the
+    response is malformed — never raises.
+    """
+    if not HELIUS_API_KEY or not token_address:
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=HELIUS_TIMEOUT) as client:
+            resp = await client.post(
+                HELIUS_RPC_URL,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "getTokenLargestAccounts",
+                    "params": [token_address],
+                },
+            )
+            if resp.status_code != 200:
+                logger.warning("helius_holders_non_200 status=%s token=%s", resp.status_code, token_address[:12])
+                return []
+            accounts = resp.json().get("result", {}).get("value", [])
+            if not isinstance(accounts, list):
+                return []
+            # Sum of the sampled largest accounts is the supply denominator —
+            # an honest approximation of total supply (Helius returns the top
+            # ~20 largest accounts, not every holder).
+            total = sum(float(a.get("uiAmount") or 0) for a in accounts if a.get("uiAmount") is not None)
+            if total <= 0:
+                return []
+            holders: list[dict] = []
+            for acc in accounts:
+                amount = float(acc.get("uiAmount") or 0)
+                if amount <= 0:
+                    continue
+                holders.append(
+                    {
+                        "address": acc.get("address", ""),
+                        "amount": amount,
+                        "percentage": round(amount / total * 100, 2),
+                        "label": "",
+                    }
+                )
+            holders.sort(key=lambda h: h["amount"], reverse=True)
+            return holders
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.RemoteProtocolError) as e:
+        logger.warning("helius_holders_unavailable token=%s error=%s", token_address[:12], str(e)[:100])
+        return []
+    except Exception as e:  # noqa: BLE001 — fail-open by design
+        logger.warning("helius_holders_failed token=%s error=%s", token_address[:12], str(e)[:100])
+        return []
+
+
 async def get_token_holders(token_address: str, chain: str) -> list[dict]:
-    """Get token holders from our data sources."""
+    """Get token holders from our data sources.
+
+    Solana SPL tokens use Helius ``getTokenLargestAccounts`` (real holder
+    distribution). All other chains fall back to the bubble-map graph nodes.
+    """
+    if chain == "solana":
+        solana_holders = await get_solana_holders(token_address)
+        if solana_holders:
+            return solana_holders
     try:
         from app.bubble_maps import get_bubble_maps_pro
 

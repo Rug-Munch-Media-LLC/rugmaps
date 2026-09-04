@@ -680,3 +680,142 @@ class TestTokenGraphEndpoint:
         """Missing token_address query param → 422 (FastAPI validation)."""
         resp = await client.get("/api/v1/rugmaps/token-graph?chain=ethereum")
         assert resp.status_code == 422
+
+
+# ── Solana SPL Holder Tests (Helius getTokenLargestAccounts) ───────────────
+
+
+class TestSolanaHolders:
+    """Tests for get_solana_holders + the solana branch of get_token_holders."""
+
+    @pytest.mark.asyncio
+    async def test_get_solana_holders_parses_largest_accounts(self):
+        """get_solana_holders should parse Helius accounts into the holder contract."""
+        from unittest.mock import patch
+
+        import app.rugmaps_ai as ai
+
+        helius_response = {
+            "result": {
+                "value": [
+                    {"address": "Whale1", "amount": "500000000", "decimals": 6, "uiAmount": 500.0},
+                    {"address": "Whale2", "amount": "300000000", "decimals": 6, "uiAmount": 300.0},
+                    {"address": "Whale3", "amount": "200000000", "decimals": 6, "uiAmount": 200.0},
+                ]
+            }
+        }
+
+        class _FakeResp:
+            status_code = 200
+
+            def json(self):
+                return helius_response
+
+        class _FakeClient:
+            def __init__(self, *a, **kw):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def post(self, *a, **kw):
+                return _FakeResp()
+
+        with (
+            patch.object(ai, "HELIUS_API_KEY", "test-key"),
+            patch.object(ai.httpx, "AsyncClient", new=_FakeClient),
+        ):
+            holders = await ai.get_solana_holders("So11111111111111111111111111111111111111112")
+
+        assert len(holders) == 3
+        # Sorted by amount descending
+        assert holders[0]["address"] == "Whale1"
+        assert holders[0]["amount"] == 500.0
+        # 500 / 1000 total = 50%
+        assert holders[0]["percentage"] == 50.0
+        assert holders[2]["percentage"] == 20.0
+        # Contract shape matches the EVM holder path
+        assert set(holders[0].keys()) == {"address", "amount", "percentage", "label"}
+        assert holders[0]["label"] == ""
+
+    @pytest.mark.asyncio
+    async def test_get_solana_holders_fails_open_without_key(self):
+        """No HELIUS_API_KEY → [] (never raises)."""
+        from unittest.mock import patch
+
+        import app.rugmaps_ai as ai
+
+        with patch.object(ai, "HELIUS_API_KEY", ""):
+            assert await ai.get_solana_holders("So11111111111111111111111111111111111111112") == []
+
+    @pytest.mark.asyncio
+    async def test_get_solana_holders_fails_open_on_http_error(self):
+        """Helius non-200 → [] (never raises)."""
+        from unittest.mock import patch
+
+        import app.rugmaps_ai as ai
+
+        class _FakeResp:
+            status_code = 500
+
+            def json(self):
+                return {}
+
+        class _FakeClient:
+            def __init__(self, *a, **kw):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def post(self, *a, **kw):
+                return _FakeResp()
+
+        with (
+            patch.object(ai, "HELIUS_API_KEY", "test-key"),
+            patch.object(ai.httpx, "AsyncClient", new=_FakeClient),
+        ):
+            assert await ai.get_solana_holders("So11111111111111111111111111111111111111112") == []
+
+    @pytest.mark.asyncio
+    async def test_get_token_holders_uses_solana_path_for_solana_chain(self):
+        """chain == 'solana' should call get_solana_holders, not the graph."""
+        from unittest.mock import AsyncMock, patch
+
+        import app.rugmaps_ai as ai
+
+        solana_holders = [{"address": "Whale1", "amount": 500.0, "percentage": 50.0, "label": ""}]
+
+        with patch.object(ai, "get_solana_holders", new=AsyncMock(return_value=solana_holders)) as mock_sol:
+            result = await ai.get_token_holders("So11111111111111111111111111111111111111112", "solana")
+
+        mock_sol.assert_awaited_once()
+        assert result == solana_holders
+
+    @pytest.mark.asyncio
+    async def test_get_token_holders_falls_back_to_graph_when_solana_empty(self):
+        """Solana path returning [] should fall back to the graph path."""
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, patch
+
+        import app.bubble_maps as bm_mod
+        import app.rugmaps_ai as ai
+
+        fake_bm = AsyncMock()
+        fake_bm.generate_map = AsyncMock(
+            return_value=SimpleNamespace(to_dict=lambda: {"nodes": [{"address": "0xabc", "value": 1.0}]})
+        )
+
+        with (
+            patch.object(ai, "get_solana_holders", new=AsyncMock(return_value=[])),
+            patch.object(bm_mod, "get_bubble_maps_pro", return_value=fake_bm),
+        ):
+            result = await ai.get_token_holders("So11111111111111111111111111111111111111112", "solana")
+
+        assert result == [{"address": "0xabc", "value": 1.0}]
