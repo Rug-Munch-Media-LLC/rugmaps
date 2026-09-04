@@ -1,6 +1,7 @@
 import { Activity, Crosshair, Map as MapIcon, Search } from 'lucide-react'
 import { useState } from 'react'
 import { Link, Route, Routes, useNavigate } from 'react-router-dom'
+import EmbedPage from '@/pages/EmbedPage'
 import SearchPage from '@/pages/SearchPage'
 import TokenPage from '@/pages/TokenPage'
 
@@ -123,6 +124,7 @@ export default function App() {
       <Route path="/" element={<HomePage />} />
       <Route path="/search" element={<SearchPage />} />
       <Route path="/token/:chain/:address" element={<TokenPage />} />
+      <Route path="/embed/:chain/:address" element={<EmbedPage />} />
     </Routes>
   )
 }

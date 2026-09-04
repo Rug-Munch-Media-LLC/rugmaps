@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
+from httpx import AsyncClient
 
 # ── BubbleMapsPro Unit Tests ──────────────────────────────────────────────
 
@@ -508,3 +509,174 @@ class TestVerdictGuard:
         from app.rugmaps_ai import MIN_NODES_FOR_VERDICT
 
         assert MIN_NODES_FOR_VERDICT >= 3
+
+
+# ── Token-Graph HTTP Endpoint (2026-09-03) ────────────────────────────────
+
+
+class TestTokenGraphEndpoint:
+    """GET /api/v1/rugmaps/token-graph — nodes + links + risk contract.
+
+    The endpoint is the frontend's primary data source. It must return a
+    graph with nodes, links, a risk score/level, and an AI analysis block —
+    and it must never let the AI narrate an empty graph (verdict guard).
+    """
+
+    @staticmethod
+    def _mock_graph_databus() -> AsyncMock:
+        """Return a DataBus mock that yields a 3-node graph (passes verdict guard)."""
+        from app.bubble_maps import get_bubble_maps_pro
+
+        bm = get_bubble_maps_pro()
+
+        def fake_databus(data_type: str, **kwargs):
+            addr = kwargs.get("address", "")
+            if data_type == "wallet_labels":
+                names = {
+                    "0xcenter": {"name": "Token Deployer", "type": "developer", "risk_score": 10},
+                    "0xa1": {"name": "Binance Hot Wallet", "type": "exchange", "risk_score": 5},
+                    "0xa2": {"name": "Suspected Bot", "type": "mev_bot", "risk_score": 80},
+                }
+                return {"data": {"labels": [names.get(addr, {})]}}
+            if data_type == "entity_intel":
+                if addr == "0xcenter":
+                    return {
+                        "data": {
+                            "counterparties": [
+                                {"address": "0xa1", "weight": 50.0, "transactions": 100, "risk_score": 5},
+                                {"address": "0xa2", "weight": 25.0, "transactions": 50, "risk_score": 80},
+                            ]
+                        }
+                    }
+                return {"data": {"counterparties": []}}
+            return None
+
+        bm._databus_fetch = AsyncMock(side_effect=fake_databus)
+        return bm
+
+    @pytest.mark.asyncio
+    async def test_token_graph_returns_nodes_links_risk(self, client: AsyncClient):
+        """The endpoint must return nodes + links + risk for a valid token."""
+        from unittest.mock import Mock, patch
+
+        import app.rugmaps_ai as ai
+
+        self._mock_graph_databus()
+
+        async def fake_labels(addresses, chain="ethereum"):
+            return {
+                "0xcenter": {
+                    "entity": {"name": "Deployer", "type": "developer"},
+                    "risk_score": 10,
+                    "risk_level": "low",
+                },
+                "0xa1": {"entity": {"name": "Binance", "type": "exchange"}, "risk_score": 5, "risk_level": "low"},
+                "0xa2": {"entity": {"name": "Bot", "type": "mev_bot"}, "risk_score": 80, "risk_level": "critical"},
+            }
+
+        async def fake_ai_analysis(*a, **kw):
+            return {
+                "verdict": "CAUTION",
+                "confidence": 0.7,
+                "summary": "Graph shows a dev wallet and a suspected bot.",
+                "red_flags": ["bundle_wallets"],
+                "green_flags": [],
+            }
+
+        with (
+            patch.object(ai, "get_cached_analysis", new=AsyncMock(return_value=None)),
+            patch.object(ai, "get_wallet_labels", new=fake_labels),
+            patch.object(ai, "search_similar_scams", new=AsyncMock(return_value=[])),
+            patch.object(ai, "get_token_holders", new=AsyncMock(return_value=[])),
+            patch.object(ai, "generate_ai_analysis", new=fake_ai_analysis),
+            patch.object(ai, "set_cached_analysis", new=Mock()),
+        ):
+            resp = await client.get("/api/v1/rugmaps/token-graph?token_address=0xcenter&chain=ethereum&limit=50")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        # Core graph contract
+        assert data["token_address"] == "0xcenter"  # noqa: S105 - test fixture, not a secret
+        assert data["chain"] == "ethereum"
+        assert len(data["nodes"]) >= 3
+        assert "links" in data
+        assert "risk_score" in data
+        assert "risk_level" in data
+        assert data["node_count"] >= 3
+        assert data["data_quality"] == "ok"
+
+        # Nodes carry enrichment (labels, entity type, explorer url)
+        node_by_addr = {n["address"]: n for n in data["nodes"]}
+        assert "0xa2" in node_by_addr
+        assert node_by_addr["0xa2"]["entity_type"] == "mev_bot"
+        assert node_by_addr["0xa2"]["risk"] == 80
+        assert node_by_addr["0xa1"]["explorer_url"].startswith("https://etherscan.io/address/")
+
+        # AI analysis present and not a fabricated SAFE verdict
+        assert data["analysis"]["verdict"] == "CAUTION"
+        assert data["from_cache"] is False
+
+    @pytest.mark.asyncio
+    async def test_token_graph_insufficient_data_never_safe(self, client: AsyncClient):
+        """A graph with < MIN_NODES_FOR_VERDICT nodes must return UNKNOWN, not SAFE."""
+        from unittest.mock import Mock, patch
+
+        import app.rugmaps_ai as ai
+        from app.bubble_maps import get_bubble_maps_pro
+
+        bm = get_bubble_maps_pro()
+        # Only the center node — no counterparties → insufficient data.
+        bm._databus_fetch = AsyncMock(return_value=None)  # type: ignore[method-assign]
+        bm._fetch_counterparties = AsyncMock(return_value=[])  # type: ignore[method-assign]
+
+        with (
+            patch.object(ai, "get_cached_analysis", new=AsyncMock(return_value=None)),
+            patch.object(ai, "get_wallet_labels", new=AsyncMock(return_value={})),
+            patch.object(ai, "search_similar_scams", new=AsyncMock(return_value=[])),
+            patch.object(ai, "get_token_holders", new=AsyncMock(return_value=[])),
+            patch.object(ai, "set_cached_analysis", new=Mock()),
+        ):
+            resp = await client.get("/api/v1/rugmaps/token-graph?token_address=0xlone&chain=ethereum&limit=50")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        assert data["data_quality"] == "insufficient"
+        assert data["analysis"]["verdict"] == "UNKNOWN"
+        assert data["analysis"]["status"] == "insufficient_data"
+        assert data["analysis"]["confidence"] == 0
+        assert data["similar_scams"] == []
+
+    @pytest.mark.asyncio
+    async def test_token_graph_ai_failure_falls_back(self, client: AsyncClient):
+        """If AI analysis throws, the endpoint must fall back, not 500."""
+        from unittest.mock import Mock, patch
+
+        import app.rugmaps_ai as ai
+
+        self._mock_graph_databus()
+
+        async def fake_labels(addresses, chain="ethereum"):
+            return {}
+
+        with (
+            patch.object(ai, "get_cached_analysis", new=AsyncMock(return_value=None)),
+            patch.object(ai, "get_wallet_labels", new=fake_labels),
+            patch.object(ai, "search_similar_scams", new=AsyncMock(return_value=[])),
+            patch.object(ai, "get_token_holders", new=AsyncMock(return_value=[])),
+            patch.object(ai, "generate_ai_analysis", new=AsyncMock(side_effect=RuntimeError("LLM down"))),
+            patch.object(ai, "set_cached_analysis", new=Mock()),
+        ):
+            resp = await client.get("/api/v1/rugmaps/token-graph?token_address=0xcenter&chain=ethereum&limit=50")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        # Fallback analysis still yields a verdict object (never a 500)
+        assert "analysis" in data
+        assert data["analysis"]["verdict"] in {"SAFE", "CAUTION", "RISKY", "SUSPICIOUS", "HIGH_RISK", "SCAM", "UNKNOWN"}
+        assert data["data_quality"] == "ok"
+
+    @pytest.mark.asyncio
+    async def test_token_graph_requires_token_address(self, client: AsyncClient):
+        """Missing token_address query param → 422 (FastAPI validation)."""
+        resp = await client.get("/api/v1/rugmaps/token-graph?chain=ethereum")
+        assert resp.status_code == 422

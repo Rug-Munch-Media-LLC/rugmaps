@@ -14,6 +14,33 @@ os.environ.setdefault("BACKEND_URL", "http://localhost:8000")
 os.environ.setdefault("BACKEND_TIMEOUT", "1")
 
 
+@pytest.fixture(autouse=True)
+def _reset_singletons():
+    """Reset shared singleton state between tests.
+
+    ``BubbleMapsPro`` and ``AutoLabeler`` are process-wide singletons. Tests
+    replace their ``_databus_fetch`` / ``_fetch_counterparties`` methods with
+    AsyncMocks and populate the in-memory ``_cache``. Without a reset, those
+    mutations leak across tests (a mock set in one test silently changes the
+    behavior of the next), producing order-dependent failures. This fixture
+    restores the original bound methods and clears the cache before each test.
+    """
+    from app.auto_labeler import get_auto_labeler
+    from app.bubble_maps import BubbleMapsPro, get_bubble_maps_pro
+
+    bm = get_bubble_maps_pro()
+    # Restore the real bound methods (tests may have replaced them with mocks).
+    bm._databus_fetch = BubbleMapsPro._databus_fetch.__get__(bm, BubbleMapsPro)
+    bm._fetch_counterparties = BubbleMapsPro._fetch_counterparties.__get__(bm, BubbleMapsPro)
+    bm._cache.clear()
+
+    labeler = get_auto_labeler()
+    labeler._observations.clear()
+    labeler._labels_cache.clear()
+    labeler._stats.clear()
+    yield
+
+
 @pytest_asyncio.fixture
 async def client() -> AsyncGenerator[AsyncClient, None]:
     """FastAPI test client with ASGI transport.
