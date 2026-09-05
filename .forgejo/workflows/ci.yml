@@ -187,7 +187,12 @@ jobs:
         run: bandit -r app --severity-level medium --quiet
       - name: Tests with coverage floor (50%)
         run: |
-          python -m pytest tests/ --cov=app --cov-report=term-missing --cov-fail-under=50
+          python -m pytest tests/ --cov=app --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=50
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./backend/coverage.xml
+          fail_ci_if_error: false
 
   # ─── Security (Gitleaks) ─────────────────────────────────────────────
   security:
