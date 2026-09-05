@@ -227,3 +227,23 @@ jobs:
         run: osv-scanner scan source --format table ./ || echo "::warning::OSV findings — triaged baseline, see log"
       - name: Trufflehog verified-live secrets (all history)
         run: trufflehog git file://. --only-verified --fail --no-update
+
+  # ─── SAST (Semgrep) ──────────────────────────────────────────────────
+  sast:
+    runs-on: docker-x64
+    container:
+      image: returntocorp/semgrep:latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Semgrep SAST scan
+        run: semgrep scan --config=auto --error --error-severity=ERROR --exclude='tests/' backend/
+
+  # ─── Container Scan (Trivy) ──────────────────────────────────────────
+  container-scan:
+    runs-on: docker-x64
+    container:
+      image: aquasec/trivy:latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Trivy scan
+        run: trivy fs --severity CRITICAL,HIGH --exit-code 1 .
