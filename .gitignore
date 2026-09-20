@@ -39,3 +39,4 @@ tmp/
 .idea/
 # pytest coverage artifact
 .coverage
+.methodology-patterns
