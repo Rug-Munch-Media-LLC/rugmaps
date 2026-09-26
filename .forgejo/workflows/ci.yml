@@ -135,7 +135,7 @@ jobs:
         run: covgate check coverage/coverage-final.json --base origin/main
       - name: Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v5.0.0
         with:
           name: coverage-report
           path: |
@@ -260,7 +260,7 @@ jobs:
         with:
           format: cyclonedx-json
           output: sbom.spdx.json
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v5.0.0
         with:
           name: sbom
           path: sbom.spdx.json
